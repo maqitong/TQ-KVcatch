@@ -1,0 +1,61 @@
+# --- Python build artifacts ---
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
+*.egg
+build/
+dist/
+.eggs/
+*.so
+
+# --- Virtual / conda environments (4.85 GB!) ---
+env/
+venv/
+.venv/
+.conda/
+turboquant-pytorch/env/
+
+# --- Editor / linter / test caches ---
+.idea/
+.vscode/
+.ruff_cache/
+.mypy_cache/
+.pytest_cache/
+.tox/
+*.swp
+*~
+
+# --- OS junk ---
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# --- Reports (kept local only, per project decision) ---
+report*.txt
+report*.md
+*汇报*.txt
+
+# --- Model weight & HF caches ---
+.cache/
+hf_cache/
+huggingface/
+*.bin
+*.safetensors
+*.pt
+*.pth
+
+# --- Logs / temporary outputs ---
+*.log
+nohup.out
+out/
+outputs/
+runs/
+wandb/
+
+# --- Jupyter ---
+.ipynb_checkpoints/
+
+# --- pip-tools / lock generation ---
+.pip-cache/

@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(dir \"D:\\\\KVcatch\\\\bt-kvcatch\" /s /b)",
+      "Bash(conda --version)",
+      "Bash(conda info *)",
+      "Bash(conda create *)",
+      "Bash(conda run *)",
+      "Bash(\"C:/Users/mqt/miniconda3/envs/kvcatch/python.exe\" -u -m turboquant.block_cache.experiment)",
+      "Bash(C:/Users/mqt/miniconda3/envs/kvcatch/python.exe *)",
+      "mcp__plugin_ecc_exa__web_search_exa"
+    ]
+  }
+}
