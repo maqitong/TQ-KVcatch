@@ -92,6 +92,7 @@ class TurboQuantBackend(nn.Module):
         protected_bits: int = 8,
         group_size: int | None = None,
         use_reorder: bool = False,
+        head_local_reorder: bool = True,
         seed_base: int = 42,
         clipping: list[float] | float | None = None,
     ) -> None:
@@ -106,6 +107,7 @@ class TurboQuantBackend(nn.Module):
         self.protected_bits = protected_bits
         self.group_size = group_size
         self.use_reorder = use_reorder
+        self.head_local_reorder = head_local_reorder
         self.seed_base = seed_base
         self.clipping = clipping
         self._param_cache: dict[
@@ -115,7 +117,7 @@ class TurboQuantBackend(nn.Module):
     @property
     def tag(self) -> str:
         protect = f"-protect{self.protected_layers}" if self.protected_layers else ""
-        reorder = "-tqrod" if self.use_reorder else "-tq"
+        reorder = "-tqrodh" if self.use_reorder and self.head_local_reorder else "-tqrod" if self.use_reorder else "-tq"
         return f"{reorder}{protect}"
 
     def _bits(self, ttype: Literal["k", "v"]) -> int | float:
@@ -214,6 +216,13 @@ class TurboQuantBackend(nn.Module):
             starts.append(self.hidden)
         return torch.tensor(starts, dtype=torch.long, device=device)
 
+    def _head_group_starts(self, device: torch.device) -> torch.Tensor:
+        group_size = self.group_size or self.head_dim
+        starts = list(range(0, self.head_dim, group_size))
+        if not starts or starts[-1] != self.head_dim:
+            starts.append(self.head_dim)
+        return torch.tensor(starts, dtype=torch.long, device=device)
+
     @torch.no_grad()
     def quant(
         self,
@@ -240,6 +249,29 @@ class TurboQuantBackend(nn.Module):
                 raise ValueError("TurboQuant reorder mode requires SKVQ reorder metadata")
             flat_hidden = tensor.transpose(1, 2).reshape(bs, seqlen, self.hidden)
             idx = reorder_idx[ttype].long().to(tensor.device)
+            if self.head_local_reorder:
+                out = torch.empty_like(flat_hidden)
+                gst = self._head_group_starts(tensor.device)
+                for head_idx in range(num_heads):
+                    h_start = head_idx * head_dim
+                    h_end = h_start + head_dim
+                    local_global_idx = idx[(idx >= h_start) & (idx < h_end)]
+                    if local_global_idx.numel() != head_dim:
+                        local_global_idx = torch.arange(h_start, h_end, device=tensor.device)
+                    local_idx = local_global_idx - h_start
+                    work = flat_hidden[..., h_start:h_end][..., local_idx]
+                    head_out = torch.empty_like(work)
+                    for group_idx in range(gst.numel() - 1):
+                        start = int(gst[group_idx].item())
+                        end = int(gst[group_idx + 1].item())
+                        chunk = work[..., start:end].reshape(-1, end - start)
+                        seed_group_idx = head_idx * (gst.numel() - 1) + group_idx
+                        head_out[..., start:end] = self._quant_flat(
+                            chunk, ttype, seed_group_idx, bits, dtype
+                        ).reshape(bs, seqlen, end - start)
+                    out[..., h_start:h_end] = head_out.gather(-1, local_idx.argsort().expand_as(head_out))
+                return out.reshape(bs, seqlen, num_heads, head_dim).transpose(1, 2).contiguous(), None, None
+
             work = flat_hidden[..., idx]
             gst = group_st_idx[ttype].long().to(tensor.device)
             out = torch.empty_like(work)

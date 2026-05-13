@@ -289,6 +289,8 @@ class MistralAttention(nn.Module):
 
                     (k_sink,k_quant,k_window,kscale,kzp) = past_key_value[0]
                     (v_sink,v_quant,v_window,vscale,vzp) = past_key_value[1]
+                    key_states = torch.cat(list(filter(lambda x: x is not None, [k_sink, k_quant, k_window])), dim=-2)
+                    value_states = torch.cat(list(filter(lambda x: x is not None, [v_sink, v_quant, v_window])), dim=-2)
 
             else:
                 # [sink, quant, window, scale, zp]
@@ -511,6 +513,8 @@ class MistralFlashAttention2(MistralAttention):
 
                     (k_sink,k_quant,k_window,kscale,kzp) = past_key_value[0]
                     (v_sink,v_quant,v_window,vscale,vzp) = past_key_value[1]
+                    key_states = torch.cat(list(filter(lambda x: x is not None, [k_sink, k_quant, k_window])), dim=-2)
+                    value_states = torch.cat(list(filter(lambda x: x is not None, [v_sink, v_quant, v_window])), dim=-2)
             # SKVQ
             else:
                 # [sink, quant, window, scale, zp]
