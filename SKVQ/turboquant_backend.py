@@ -47,8 +47,8 @@ def _normal_cdf(x: float) -> float:
     return 0.5 * (1.0 + math.erf(x / math.sqrt(2.0)))
 
 
-def _solve_gaussian_lloyd_max(dim: int, bits: int, max_iter: int = 200, tol: float = 1e-10):
-    levels = 2 ** bits
+def _solve_gaussian_lloyd_max(dim: int, bits: int | float, max_iter: int = 200, tol: float = 1e-10):
+    levels = 3 if bits == 1.5 else 2 ** int(bits)
     sigma = 1.0 / math.sqrt(dim)
     lo, hi = -3.5 * sigma, 3.5 * sigma
     centroids = [lo + (hi - lo) * (i + 0.5) / levels for i in range(levels)]
@@ -78,7 +78,7 @@ def _solve_gaussian_lloyd_max(dim: int, bits: int, max_iter: int = 200, tol: flo
 class TurboQuantBackend(nn.Module):
     """Fake-quant TurboQuant backend with the same tensor contract as SKVQ."""
 
-    _codebook_cache: dict[tuple[int, int], tuple[torch.Tensor, torch.Tensor]] = {}
+    _codebook_cache: dict[tuple[int, float], tuple[torch.Tensor, torch.Tensor]] = {}
 
     def __init__(
         self,
@@ -118,10 +118,8 @@ class TurboQuantBackend(nn.Module):
         reorder = "-tqrod" if self.use_reorder else "-tq"
         return f"{reorder}{protect}"
 
-    def _bits(self, ttype: Literal["k", "v"]) -> int:
+    def _bits(self, ttype: Literal["k", "v"]) -> int | float:
         bits = self.key_bits if ttype == "k" else self.value_bits
-        if bits != round(bits):
-            raise ValueError("TurboQuant backend only supports integer bit-widths")
 
         is_protected = (
             self.protected_layers > 0
@@ -132,6 +130,10 @@ class TurboQuantBackend(nn.Module):
         )
         if is_protected:
             bits = self.protected_bits
+        if bits == 1.5:
+            return bits
+        if bits != round(bits):
+            raise ValueError(f"TurboQuant backend only supports integer or 1.5-bit widths, got {bits}")
         return min(int(bits), 8)
 
     def _clip_scale(self) -> float:
@@ -142,10 +144,10 @@ class TurboQuantBackend(nn.Module):
         return float(self.clipping[self.layer_idx])
 
     @classmethod
-    def _codebook(cls, dim: int, bits: int) -> tuple[torch.Tensor, torch.Tensor]:
+    def _codebook(cls, dim: int, bits: int | float) -> tuple[torch.Tensor, torch.Tensor]:
         key = (dim, bits)
         if key not in cls._codebook_cache:
-            if LloydMaxCodebook is None:
+            if bits == 1.5 or LloydMaxCodebook is None:
                 cls._codebook_cache[key] = _solve_gaussian_lloyd_max(dim, bits)
             else:
                 codebook = LloydMaxCodebook(dim, bits)
