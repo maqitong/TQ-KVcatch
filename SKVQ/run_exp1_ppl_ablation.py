@@ -38,7 +38,7 @@ MODEL_CLASSES = {
     "mistral": MistralForCausalLM,
 }
 
-DEFAULT_METHODS = "fp16,KIVI,skvq_baseline,tq_replace,tq_hybrid"
+DEFAULT_METHODS = "fp16,KIVI,skvq_baseline,tq_replace,tq_hybrid,tq_asym_protect"
 DEFAULT_BITS = "2+2,2+1.5,1.5+1.5"
 DEFAULT_DATASETS = "wikitext2,c4"
 DEFAULT_SEQ_LENS = "2048,4096"
@@ -86,6 +86,8 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--c4-config", default="en")
     p.add_argument("--c4-split", default="validation")
     p.add_argument("--c4-streaming", action=argparse.BooleanOptionalAction, default=True)
+    p.add_argument("--protect-layers", type=int, default=4, help="First/last N layers protected at higher bits for tq_asym_protect")
+    p.add_argument("--protected-bits", type=int, default=8, help="Bit-width for protected layers in tq_asym_protect")
     p.add_argument("--force-recalib", action="store_true")
     p.add_argument("--resume", action="store_true", help="Keep existing rows and skip completed combos")
     return p.parse_args()
@@ -356,7 +358,24 @@ def build_manager(
     if method == "tq_hybrid":
         return ModelKVCacheManager.create(
             reorder_file=str(reorder_path),
-            turboquant_config={"use_reorder": True, "protected_layers": 0, "seed_base": 42},
+            turboquant_config={
+                "use_reorder": True,
+                "head_local_reorder": True,
+                "protected_layers": 0,
+                "seed_base": 42,
+            },
+            **common,
+        )
+    if method == "tq_asym_protect":
+        return ModelKVCacheManager.create(
+            reorder_file=str(reorder_path),
+            turboquant_config={
+                "use_reorder": True,
+                "head_local_reorder": True,
+                "protected_layers": args.protect_layers,
+                "protected_bits": args.protected_bits,
+                "seed_base": 42,
+            },
             **common,
         )
     raise ValueError(f"unknown method: {method}")
@@ -508,6 +527,9 @@ def main() -> None:
     seq_lens = parse_seq_lens(args)
     model_cls = MODEL_CLASSES[args.model_family]
     csv_path = results_dir / "exp1_ppl_ablation.csv"
+
+    if not args.resume and csv_path.exists():
+        csv_path.unlink()
 
     existing_rows = read_existing_rows(csv_path) if args.resume else []
     completed = {combo_key(row) for row in existing_rows if row.get("status") in {"ok", "error", "unsupported"}}
