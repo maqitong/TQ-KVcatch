@@ -38,7 +38,7 @@ MODEL_CLASSES = {
     "mistral": MistralForCausalLM,
 }
 
-DEFAULT_METHODS = "fp16,KIVI,skvq_baseline,tq_replace,tq_hybrid,tq_asym_protect"
+DEFAULT_METHODS = "fp16,KIVI,skvq_baseline,tq_replace,tq_hybrid"
 DEFAULT_BITS = "2+2,2+1.5,1.5+1.5"
 DEFAULT_DATASETS = "wikitext2,c4"
 DEFAULT_SEQ_LENS = "2048,4096"
@@ -60,6 +60,8 @@ CSV_FIELDS = [
     "window_size",
     "sink",
     "clip",
+    "protect_layers",
+    "protected_bits",
     "error",
 ]
 
@@ -411,8 +413,16 @@ def eval_ppl(model, chunks: list[torch.Tensor]) -> float:
 # Result IO
 # ---------------------------------------------------------------------------
 
-def combo_key(row: dict) -> tuple[str, str, str, str, str]:
-    return (row["dataset"], str(row["seq_len"]), row["method"], row["kbits"], row["vbits"])
+def combo_key(row: dict) -> tuple[str, str, str, str, str, str, str]:
+    return (
+        row["dataset"],
+        str(row["seq_len"]),
+        row["method"],
+        row["kbits"],
+        row["vbits"],
+        str(row.get("protect_layers", "")),
+        str(row.get("protected_bits", "")),
+    )
 
 
 def read_existing_rows(csv_path: Path) -> list[dict]:
@@ -463,6 +473,8 @@ def base_row(args: argparse.Namespace, dataset: str, seq_len: int, method: str, 
         "window_size": args.window_size,
         "sink": args.sink,
         "clip": args.clip,
+        "protect_layers": args.protect_layers if method == "tq_asym_protect" else "",
+        "protected_bits": args.protected_bits if method == "tq_asym_protect" else "",
         "error": "",
     }
 
