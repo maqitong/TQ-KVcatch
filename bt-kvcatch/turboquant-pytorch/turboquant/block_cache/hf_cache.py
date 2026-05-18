@@ -37,6 +37,13 @@ except ImportError:  # pragma: no cover
 from .blocks import BlockState, BlockTable, KVBlock
 from .policies import GroupingPolicy, TokenBlockPolicy
 from .quantizer import BlockMSECompressor
+from .bit_allocator import (
+    FixedPageBitAllocator,
+    PageBitAllocator,
+    TopRatioPageBitAllocator,
+)
+from .page_importance import build_page_importance_scorer
+from .skvq_quantizer import SKVQPageCompressor
 
 
 @dataclass
@@ -49,6 +56,18 @@ class BlockCacheConfig:
     granularity: str = "per-vector"  # 'per-vector' | 'per-block'
     seed: int = 42
     policy: GroupingPolicy = field(default_factory=TokenBlockPolicy)
+    quant_backend: str = "turboquant"  # 'turboquant' | 'skvq'
+    mixed_precision: bool = False
+    importance_metric: str = "k_norm"
+    important_ratio: float = 0.2
+    high_key_bits: float = 4
+    high_value_bits: float = 2
+    low_key_bits: float = 2
+    low_value_bits: float = 2
+    group_size: int = 128
+    clipping: float = 0.92
+    reorder_file: Optional[str] = None
+    reorder_meta: Optional[dict[str, Any]] = None
 
 
 # ---------------------------------------------------------------------------
@@ -71,20 +90,58 @@ class BlockCacheLayer(_HFCacheLayerMixin):
     is_sliding = False
     is_compileable = False
 
-    def __init__(self, config: BlockCacheConfig, layer_idx: int = 0):
+    def __init__(
+        self,
+        config: BlockCacheConfig,
+        layer_idx: int = 0,
+        reorder_meta: Optional[dict[str, Any]] = None,
+    ):
         if _HF_AVAILABLE:
             super().__init__()
         else:
             self.is_initialized = False
         self.cfg = config
         self.layer_idx = layer_idx
+        self.reorder_meta = reorder_meta
         self.table: Optional[BlockTable] = None
         self.k_compressor: Optional[BlockMSECompressor] = None
         self.v_compressor: Optional[BlockMSECompressor] = None
+        self.skvq_compressor: Optional[SKVQPageCompressor] = None
+        self.bit_allocator: Optional[PageBitAllocator] = None
+        self._k_compressors: dict[float, BlockMSECompressor] = {}
+        self._v_compressors: dict[float, BlockMSECompressor] = {}
         self.dtype: Optional[torch.dtype] = None
         self.device: Optional[torch.device] = None
 
     # ----- abstract method implementations -----
+
+    def _layer_reorder_meta(
+        self,
+    ) -> tuple[Optional[dict[str, torch.Tensor]], Optional[dict[str, torch.Tensor]]]:
+        if self.reorder_meta is None:
+            return None, None
+
+        try:
+            reorder_pair = self.reorder_meta["reorder_indices"][self.layer_idx]
+        except (KeyError, IndexError, TypeError) as exc:
+            raise ValueError(
+                f"invalid reorder metadata for layer {self.layer_idx}"
+            ) from exc
+
+        group_pair = None
+        if "cluster_st_inds" in self.reorder_meta:
+            try:
+                group_pair = self.reorder_meta["cluster_st_inds"][self.layer_idx]
+            except (IndexError, TypeError) as exc:
+                raise ValueError(
+                    f"invalid group-start metadata for layer {self.layer_idx}"
+                ) from exc
+
+        reorder_idx = {"k": reorder_pair[0], "v": reorder_pair[1]}
+        group_st_idx = (
+            {"k": group_pair[0], "v": group_pair[1]} if group_pair is not None else None
+        )
+        return reorder_idx, group_st_idx
 
     def lazy_initialization(
         self, key_states: torch.Tensor, value_states: torch.Tensor
@@ -99,21 +156,64 @@ class BlockCacheLayer(_HFCacheLayerMixin):
             batch_size=B,
         )
         seed_base = self.cfg.seed + self.layer_idx * 1000
-        self.k_compressor = BlockMSECompressor(
-            head_dim=D,
-            bits=self.cfg.key_bits,
-            seed=seed_base,
-            granularity=self.cfg.granularity,
-            device=str(self.device),
-        )
-        self.v_compressor = BlockMSECompressor(
-            head_dim=D,
-            bits=self.cfg.value_bits,
-            seed=seed_base + 500,
-            granularity=self.cfg.granularity,
-            device=str(self.device),
-        )
+        if self.cfg.quant_backend not in ("turboquant", "skvq"):
+            raise ValueError(f"unknown quant_backend: {self.cfg.quant_backend}")
+
+        if self.cfg.quant_backend == "skvq":
+            reorder_idx, group_st_idx = self._layer_reorder_meta()
+            self.skvq_compressor = SKVQPageCompressor(
+                head_dim=D,
+                n_kv_heads=H,
+                group_size=self.cfg.group_size,
+                clipping=self.cfg.clipping,
+                reorder_idx=reorder_idx,
+                group_st_idx=group_st_idx,
+            )
+        else:
+            self.k_compressor = self._get_turboquant_compressor(
+                "k", self.cfg.key_bits, seed_base
+            )
+            self.v_compressor = self._get_turboquant_compressor(
+                "v", self.cfg.value_bits, seed_base
+            )
+
+        if self.cfg.mixed_precision:
+            scorer = build_page_importance_scorer(self.cfg.importance_metric)
+            self.bit_allocator = TopRatioPageBitAllocator(
+                scorer=scorer,
+                important_ratio=self.cfg.important_ratio,
+                high_key_bits=self.cfg.high_key_bits,
+                high_value_bits=self.cfg.high_value_bits,
+                low_key_bits=self.cfg.low_key_bits,
+                low_value_bits=self.cfg.low_value_bits,
+            )
+        else:
+            self.bit_allocator = FixedPageBitAllocator(
+                self.cfg.key_bits, self.cfg.value_bits
+            )
         self.is_initialized = True
+
+    def _get_turboquant_compressor(
+        self, ttype: str, bits: float, seed_base: Optional[int] = None
+    ) -> BlockMSECompressor:
+        bits_f = float(bits)
+        if bits_f != round(bits_f):
+            raise ValueError("TurboQuant backend only supports integer bit-widths")
+        bits_i = int(bits_f)
+        cache = self._k_compressors if ttype == "k" else self._v_compressors
+        if bits_f in cache:
+            return cache[bits_f]
+        if seed_base is None:
+            seed_base = self.cfg.seed + self.layer_idx * 1000
+        seed = seed_base if ttype == "k" else seed_base + 500
+        cache[bits_f] = BlockMSECompressor(
+            head_dim=self.table.head_dim,
+            bits=bits_i,
+            seed=seed,
+            granularity=self.cfg.granularity,
+            device=str(self.device),
+        )
+        return cache[bits_f]
 
     def update(
         self,
@@ -128,12 +228,50 @@ class BlockCacheLayer(_HFCacheLayerMixin):
         sealed = self.table.append(key_states, value_states)
         if sealed:
             to_compress = self.cfg.policy.on_seal(sealed, self.table)
+            bit_assignments = self.bit_allocator.assign_many(
+                to_compress, self.table, self.layer_idx
+            )
             for blk in to_compress:
-                ck = self.k_compressor.compress(blk.fp16_k)
-                cv = self.v_compressor.compress(blk.fp16_v)
+                k_bits, v_bits = bit_assignments[blk.block_idx]
+                blk.key_bits = k_bits
+                blk.value_bits = v_bits
+                if self.cfg.quant_backend == "skvq":
+                    ck = self.skvq_compressor.compress(
+                        blk.fp16_k,
+                        bits=k_bits,
+                        ttype="k",
+                        layer_idx=self.layer_idx,
+                    )
+                    cv = self.skvq_compressor.compress(
+                        blk.fp16_v,
+                        bits=v_bits,
+                        ttype="v",
+                        layer_idx=self.layer_idx,
+                    )
+                else:
+                    ck = self._get_turboquant_compressor("k", k_bits).compress(
+                        blk.fp16_k
+                    )
+                    cv = self._get_turboquant_compressor("v", v_bits).compress(
+                        blk.fp16_v
+                    )
                 blk.to_compressed(ck, cv)
 
         return self._materialize(key_states.dtype)
+
+    def _decompress_block(
+        self, blk: KVBlock, dtype: torch.dtype
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        if blk.compressed_k.get("backend") == "skvq":
+            k = self.skvq_compressor.decompress(blk.compressed_k).to(dtype)
+            v = self.skvq_compressor.decompress(blk.compressed_v).to(dtype)
+            return k, v
+
+        k_bits = blk.key_bits if blk.key_bits is not None else self.cfg.key_bits
+        v_bits = blk.value_bits if blk.value_bits is not None else self.cfg.value_bits
+        k = self._get_turboquant_compressor("k", k_bits).decompress(blk.compressed_k)
+        v = self._get_turboquant_compressor("v", v_bits).decompress(blk.compressed_v)
+        return k.to(dtype), v.to(dtype)
 
     def _materialize(
         self, dtype: torch.dtype
@@ -142,8 +280,7 @@ class BlockCacheLayer(_HFCacheLayerMixin):
         vs: list[torch.Tensor] = []
         for blk in self.table.blocks:
             if blk.state == BlockState.COMPRESSED:
-                k = self.k_compressor.decompress(blk.compressed_k).to(dtype)
-                v = self.v_compressor.decompress(blk.compressed_v).to(dtype)
+                k, v = self._decompress_block(blk, dtype)
             else:
                 k = blk.fp16_k.to(dtype)
                 v = blk.fp16_v.to(dtype)
@@ -207,12 +344,9 @@ class BlockCacheLayer(_HFCacheLayerMixin):
                     "crop() truncating into a COMPRESSED block; "
                     "decompressing on the fly."
                 )
-                blk.fp16_k = self.k_compressor.decompress(blk.compressed_k)[
-                    :, :, :keep_n, :
-                ]
-                blk.fp16_v = self.v_compressor.decompress(blk.compressed_v)[
-                    :, :, :keep_n, :
-                ]
+                dk, dv = self._decompress_block(blk, self.dtype)
+                blk.fp16_k = dk[:, :, :keep_n, :]
+                blk.fp16_v = dv[:, :, :keep_n, :]
                 blk.compressed_k = None
                 blk.compressed_v = None
             else:
@@ -289,6 +423,11 @@ class BlockKVCache(_HFCache):
         else:
             self.layers = []
         self.config = config or BlockCacheConfig()
+        if self.config.reorder_meta is not None and self.config.reorder_file is not None:
+            raise ValueError("set only one of reorder_meta or reorder_file")
+        self._reorder_meta = self.config.reorder_meta
+        if self._reorder_meta is None and self.config.reorder_file is not None:
+            self._reorder_meta = torch.load(self.config.reorder_file, map_location="cpu")
         self._seen_tokens: int = 0
 
     # ----- core update path -----
@@ -304,7 +443,11 @@ class BlockKVCache(_HFCache):
         # Auto-extend layer list as new layer indices appear.
         while len(self.layers) <= layer_idx:
             self.layers.append(
-                BlockCacheLayer(self.config, layer_idx=len(self.layers))
+                BlockCacheLayer(
+                    self.config,
+                    layer_idx=len(self.layers),
+                    reorder_meta=self._reorder_meta,
+                )
             )
         if layer_idx == 0:
             self._seen_tokens += key_states.shape[-2]
@@ -342,6 +485,8 @@ class BlockKVCache(_HFCache):
         fp16_baseline = 0
         n_compressed_blocks = 0
         n_fp16_blocks = 0
+        bit_histogram: dict[str, int] = {}
+        precision_histogram: dict[str, int] = {}
 
         for layer in self.layers:
             if layer.table is None:
@@ -349,6 +494,19 @@ class BlockKVCache(_HFCache):
             for blk in layer.table.blocks:
                 if blk.state == BlockState.COMPRESSED:
                     n_compressed_blocks += 1
+                    k_bits = blk.key_bits if blk.key_bits is not None else "?"
+                    v_bits = blk.value_bits if blk.value_bits is not None else "?"
+                    bit_key = f"K{k_bits}/V{v_bits}"
+                    bit_histogram[bit_key] = bit_histogram.get(bit_key, 0) + 1
+                    precision = (
+                        blk.page_meta.get("precision")
+                        if isinstance(blk.page_meta, dict)
+                        else None
+                    )
+                    if precision is not None:
+                        precision_histogram[precision] = (
+                            precision_histogram.get(precision, 0) + 1
+                        )
                 else:
                     n_fp16_blocks += 1
                 compressed_bytes += blk.memory_bytes()
@@ -370,4 +528,6 @@ class BlockKVCache(_HFCache):
             "n_compressed_blocks": n_compressed_blocks,
             "n_fp16_blocks": n_fp16_blocks,
             "n_layers": len(self.layers),
+            "bit_histogram": bit_histogram,
+            "precision_histogram": precision_histogram,
         }

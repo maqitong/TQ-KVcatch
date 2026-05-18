@@ -45,7 +45,10 @@ class KVBlock:
     compressed_k: Optional[dict] = None
     compressed_v: Optional[dict] = None
 
-    importance: float = 0.0  # reserved for future eviction extension
+    importance: float = 0.0  # page-level score used by mixed precision
+    key_bits: Optional[float] = None
+    value_bits: Optional[float] = None
+    page_meta: Optional[dict] = None
 
     @property
     def is_full(self) -> bool:

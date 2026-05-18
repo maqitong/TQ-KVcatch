@@ -11,6 +11,17 @@ from .policies import (
     HybridPolicy,
 )
 from .quantizer import BlockMSECompressor
+from .page_importance import (
+    PageImportanceScorer,
+    NormPageImportanceScorer,
+    RandomPageImportanceScorer,
+)
+from .bit_allocator import (
+    PageBitAllocator,
+    FixedPageBitAllocator,
+    TopRatioPageBitAllocator,
+)
+from .skvq_quantizer import SKVQPageCompressor
 from .hf_cache import BlockKVCache, BlockCacheConfig
 
 __all__ = [
@@ -22,6 +33,13 @@ __all__ = [
     "WindowBlockPolicy",
     "HybridPolicy",
     "BlockMSECompressor",
+    "PageImportanceScorer",
+    "NormPageImportanceScorer",
+    "RandomPageImportanceScorer",
+    "PageBitAllocator",
+    "FixedPageBitAllocator",
+    "TopRatioPageBitAllocator",
+    "SKVQPageCompressor",
     "BlockKVCache",
     "BlockCacheConfig",
 ]

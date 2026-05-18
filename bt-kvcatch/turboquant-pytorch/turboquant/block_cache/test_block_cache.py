@@ -14,6 +14,7 @@ from turboquant.block_cache import (
     BlockState,
     BlockTable,
     HybridPolicy,
+    SKVQPageCompressor,
     TokenBlockPolicy,
     WindowBlockPolicy,
 )
@@ -173,6 +174,115 @@ def test_reorder_cache_permutes_batch():
     print(f"ok: test_reorder_cache_permutes_batch  err={err.item():.4f}")
 
 
+def test_skvq_page_compressor_roundtrip():
+    cmp = SKVQPageCompressor(
+        head_dim=16,
+        n_kv_heads=2,
+        group_size=8,
+        clipping=1.0,
+    )
+    k, _ = _kv(1, 2, 8, 16, dtype=torch.float32)
+    compressed = cmp.compress(k, bits=4, ttype="k", layer_idx=0)
+    out = cmp.decompress(compressed)
+    err = (out - k).norm() / k.norm()
+    assert compressed["backend"] == "skvq"
+    assert compressed["qdata"].dtype == torch.uint8
+    assert out.shape == k.shape
+    assert out.dtype == k.dtype
+    assert err.item() < 0.25, f"SKVQ 4-bit error too high: {err.item()}"
+
+    compressed_15 = cmp.compress(k, bits=1.5, ttype="k", layer_idx=0)
+    out_15 = cmp.decompress(compressed_15)
+    assert compressed_15["bits"] == 1.5
+    assert compressed_15["container_bits"] == 2
+    assert out_15.shape == k.shape
+    print(f"ok: test_skvq_page_compressor_roundtrip  err={err.item():.4f}")
+
+
+def test_skvq_page_compressor_reorder_roundtrip():
+    hidden = 32
+    idx = torch.arange(hidden - 1, -1, -1)
+    gst = torch.tensor([0, 8, 16, 24, 32])
+    cmp = SKVQPageCompressor(
+        head_dim=16,
+        n_kv_heads=2,
+        group_size=8,
+        clipping=1.0,
+        reorder_idx={"k": idx, "v": idx},
+        group_st_idx={"k": gst, "v": gst},
+    )
+    k, _ = _kv(1, 2, 8, 16, dtype=torch.float32)
+    compressed = cmp.compress(k, bits=4, ttype="k", layer_idx=0)
+    out = cmp.decompress(compressed)
+    err = (out - k).norm() / k.norm()
+    assert compressed["reordered"] is True
+    assert out.shape == k.shape
+    assert err.item() < 0.3, f"SKVQ reorder 4-bit error too high: {err.item()}"
+    print(f"ok: test_skvq_page_compressor_reorder_roundtrip  err={err.item():.4f}")
+
+
+def test_block_kv_cache_skvq_mixed_precision_pages():
+    cache = BlockKVCache(BlockCacheConfig(
+        block_size=4,
+        policy=TokenBlockPolicy(),
+        quant_backend="skvq",
+        mixed_precision=True,
+        importance_metric="k_norm",
+        important_ratio=0.5,
+        high_key_bits=4,
+        high_value_bits=4,
+        low_key_bits=2,
+        low_value_bits=1.5,
+        group_size=8,
+        clipping=1.0,
+    ))
+    k, v = _kv(1, 2, 12, 8)
+    full_k, full_v = cache.update(k, v, layer_idx=0)
+    assert full_k.shape == (1, 2, 12, 8)
+    assert full_v.shape == (1, 2, 12, 8)
+    blocks = cache.layers[0].table.blocks
+    assert all(b.state == BlockState.COMPRESSED for b in blocks)
+    assert {b.page_meta["precision"] for b in blocks} == {"high", "low"}
+    assert all(b.key_bits is not None and b.value_bits is not None for b in blocks)
+
+    report = cache.memory_report()
+    assert report["precision_histogram"]["high"] == 2
+    assert report["precision_histogram"]["low"] == 1
+    assert report["bit_histogram"]["K4.0/V4.0"] == 2
+    assert report["bit_histogram"]["K2.0/V1.5"] == 1
+    print("ok: test_block_kv_cache_skvq_mixed_precision_pages")
+
+
+def test_block_kv_cache_skvq_reorder_metadata():
+    hidden = 16
+    idx = torch.arange(hidden - 1, -1, -1)
+    gst = torch.tensor([0, 8, 16])
+    reorder_meta = {
+        "reorder_indices": [(idx, idx)],
+        "cluster_st_inds": [(gst, gst)],
+    }
+    cache = BlockKVCache(BlockCacheConfig(
+        block_size=4,
+        key_bits=4,
+        value_bits=4,
+        policy=TokenBlockPolicy(),
+        quant_backend="skvq",
+        group_size=8,
+        clipping=1.0,
+        reorder_meta=reorder_meta,
+    ))
+    k, v = _kv(1, 2, 8, 8)
+    full_k, full_v = cache.update(k, v, layer_idx=0)
+    err = (full_k.float() - k.float()).norm() / k.float().norm()
+    blocks = cache.layers[0].table.blocks
+    assert full_k.shape == k.shape
+    assert full_v.shape == v.shape
+    assert all(b.compressed_k["reordered"] for b in blocks)
+    assert cache.layers[0].skvq_compressor.reorder_idx["k"].equal(idx)
+    assert err.item() < 0.3, f"SKVQ cache reorder error too high: {err.item()}"
+    print(f"ok: test_block_kv_cache_skvq_reorder_metadata  err={err.item():.4f}")
+
+
 def main():
     test_block_table_splits_into_blocks()
     test_token_block_policy_compresses_all_sealed()
@@ -184,6 +294,10 @@ def main():
     test_block_kv_cache_window_policy_memory_drops()
     test_block_kv_cache_per_layer_independence()
     test_reorder_cache_permutes_batch()
+    test_skvq_page_compressor_roundtrip()
+    test_skvq_page_compressor_reorder_roundtrip()
+    test_block_kv_cache_skvq_mixed_precision_pages()
+    test_block_kv_cache_skvq_reorder_metadata()
     print("\nAll block_cache tests passed.")
 
 

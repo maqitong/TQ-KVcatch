@@ -12,7 +12,15 @@ We solve the Lloyd-Max conditions (continuous 1-D k-means) to find optimal centr
 
 import torch
 import math
-from scipy import integrate, special
+
+try:
+    from scipy import integrate, special  # type: ignore
+
+    _SCIPY_AVAILABLE = True
+except ImportError:  # pragma: no cover - exercised in minimal local envs
+    integrate = None
+    special = None
+    _SCIPY_AVAILABLE = False
 
 
 def beta_pdf(x: float, d: int) -> float:
@@ -27,6 +35,63 @@ def gaussian_approx_pdf(x: float, d: int) -> float:
     """Gaussian approximation N(0, 1/d) -- accurate for d >= 64."""
     sigma2 = 1.0 / d
     return (1.0 / math.sqrt(2 * math.pi * sigma2)) * math.exp(-x * x / (2 * sigma2))
+
+
+def _normal_pdf(x: float) -> float:
+    if math.isinf(x):
+        return 0.0
+    return math.exp(-0.5 * x * x) / math.sqrt(2.0 * math.pi)
+
+
+def _normal_cdf(x: float) -> float:
+    if x == float("-inf"):
+        return 0.0
+    if x == float("inf"):
+        return 1.0
+    return 0.5 * (1.0 + math.erf(x / math.sqrt(2.0)))
+
+
+def _solve_gaussian_lloyd_max(d: int, bits: int, max_iter: int, tol: float):
+    n_levels = 2 ** bits
+    sigma = 1.0 / math.sqrt(d)
+    lo, hi = -3.5 * sigma, 3.5 * sigma
+    centroids = [lo + (hi - lo) * (i + 0.5) / n_levels for i in range(n_levels)]
+
+    for _ in range(max_iter):
+        boundaries = [(centroids[i] + centroids[i + 1]) / 2.0 for i in range(n_levels - 1)]
+        edges = [float("-inf")] + boundaries + [float("inf")]
+        new_centroids = []
+        for i in range(n_levels):
+            a = edges[i] / sigma if not math.isinf(edges[i]) else edges[i]
+            b = edges[i + 1] / sigma if not math.isinf(edges[i + 1]) else edges[i + 1]
+            denom = _normal_cdf(b) - _normal_cdf(a)
+            if denom > 1e-15:
+                new_centroids.append(sigma * (_normal_pdf(a) - _normal_pdf(b)) / denom)
+            else:
+                new_centroids.append(centroids[i])
+
+        max_shift = max(abs(new_centroids[i] - centroids[i]) for i in range(n_levels))
+        centroids = new_centroids
+        if max_shift < tol:
+            break
+
+    boundaries = [(centroids[i] + centroids[i + 1]) / 2.0 for i in range(n_levels - 1)]
+    return (
+        torch.tensor(centroids, dtype=torch.float32),
+        torch.tensor(boundaries, dtype=torch.float32),
+    )
+
+
+def _quad_fallback(func, a: float, b: float, steps: int = 512) -> float:
+    if a == float("-inf"):
+        a = -8.0
+    if b == float("inf"):
+        b = 8.0
+    step = (b - a) / steps
+    total = 0.5 * (func(a) + func(b))
+    for i in range(1, steps):
+        total += func(a + i * step)
+    return total * step
 
 
 def solve_lloyd_max(d: int, bits: int, use_exact: bool = False, max_iter: int = 200, tol: float = 1e-10):
@@ -44,6 +109,11 @@ def solve_lloyd_max(d: int, bits: int, use_exact: bool = False, max_iter: int = 
         centroids: sorted tensor of 2^bits optimal centroids
         boundaries: sorted tensor of 2^bits - 1 boundaries between centroids
     """
+    if not _SCIPY_AVAILABLE and not use_exact:
+        return _solve_gaussian_lloyd_max(d, bits, max_iter, tol)
+    if not _SCIPY_AVAILABLE and use_exact:
+        raise ImportError("scipy is required for exact Beta Lloyd-Max codebooks")
+
     n_levels = 2 ** bits
     pdf = (lambda x: beta_pdf(x, d)) if use_exact else (lambda x: gaussian_approx_pdf(x, d))
     sigma = 1.0 / math.sqrt(d)
@@ -98,7 +168,12 @@ def compute_expected_distortion(d: int, bits: int, centroids: torch.Tensor, boun
     for i in range(n_levels):
         a, b = edges[i], edges[i + 1]
         c = centroids[i].item()
-        dist, _ = integrate.quad(lambda x: (x - c) ** 2 * pdf(x), a, b)
+        if _SCIPY_AVAILABLE:
+            dist, _ = integrate.quad(lambda x: (x - c) ** 2 * pdf(x), a, b)
+        elif use_exact:
+            raise ImportError("scipy is required for exact Beta distortion")
+        else:
+            dist = _quad_fallback(lambda x: (x - c) ** 2 * pdf(x), a, b)
         total_distortion += dist
 
     return total_distortion
