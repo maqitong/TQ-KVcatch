@@ -54,10 +54,47 @@ class RandomPageImportanceScorer(PageImportanceScorer):
         return random.random()
 
 
+class AttentionScorePageImportanceScorer(PageImportanceScorer):
+    """Use accumulated attention mass for each page when available.
+
+    `BlockKVCache.record_attention()` writes cumulative attention statistics to
+    `block.page_meta`. This scorer keeps the same interface as norm-based
+    scorers, so bit allocators can switch metrics without special cases.
+    """
+
+    name = "attention_score"
+
+    def score(self, block: "KVBlock", table: "BlockTable", layer_idx: int) -> float:
+        if not isinstance(block.page_meta, dict):
+            return float(block.importance)
+        score = float(block.page_meta.get("attention_score", block.importance))
+        count = float(block.page_meta.get("attention_count", 1.0))
+        if count <= 0:
+            return score
+        return score / count
+
+
+class VKRatioPageImportanceScorer(PageImportanceScorer):
+    """PagedEviction-style norm-ratio proxy: mean(||V||) / mean(||K||)."""
+
+    name = "vk_ratio"
+
+    def score(self, block: "KVBlock", table: "BlockTable", layer_idx: int) -> float:
+        if block.fp16_k is None or block.fp16_v is None:
+            return float(block.importance)
+        k_norm = float(block.fp16_k.float().norm(dim=-1).mean().item())
+        v_norm = float(block.fp16_v.float().norm(dim=-1).mean().item())
+        return v_norm / max(k_norm, 1e-8)
+
+
 def build_page_importance_scorer(name: str) -> PageImportanceScorer:
     normalized = name.replace("-", "_")
     if normalized in ("k_norm", "v_norm", "kv_norm"):
         return NormPageImportanceScorer(normalized)
     if normalized == "random":
         return RandomPageImportanceScorer()
+    if normalized in ("attention", "attention_score", "attn", "attn_score"):
+        return AttentionScorePageImportanceScorer()
+    if normalized in ("vk_ratio", "v_k_ratio"):
+        return VKRatioPageImportanceScorer()
     raise ValueError(f"unknown page importance metric: {name}")

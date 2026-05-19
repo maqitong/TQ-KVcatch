@@ -88,24 +88,35 @@ class SKVQPageCompressor:
         head_dim: int,
         n_kv_heads: int,
         group_size: int = 128,
+        key_group_size: int | None = None,
+        value_group_size: int | None = None,
         clipping: float = 0.92,
         reorder_idx: Optional[dict[str, torch.Tensor]] = None,
         group_st_idx: Optional[dict[str, torch.Tensor]] = None,
     ):
         if group_size <= 0:
             raise ValueError("group_size must be positive")
+        if key_group_size is not None and key_group_size <= 0:
+            raise ValueError("key_group_size must be positive")
+        if value_group_size is not None and value_group_size <= 0:
+            raise ValueError("value_group_size must be positive")
         self.head_dim = head_dim
         self.n_kv_heads = n_kv_heads
         self.hidden = head_dim * n_kv_heads
         self.group_size = group_size
+        self.key_group_size = key_group_size or group_size
+        self.value_group_size = value_group_size or group_size
         self.clipping = float(clipping)
         self.reorder_idx = reorder_idx
         self.group_st_idx = group_st_idx
 
+    def _group_size(self, ttype: str) -> int:
+        return self.key_group_size if ttype == "k" else self.value_group_size
+
     def _group_starts(self, ttype: str, device: torch.device) -> torch.Tensor:
         if self.group_st_idx is not None and ttype in self.group_st_idx:
             return self.group_st_idx[ttype].long().to(device)
-        return _natural_group_starts(self.hidden, self.group_size, device)
+        return _natural_group_starts(self.hidden, self._group_size(ttype), device)
 
     def _reorder(self, states: torch.Tensor, ttype: str) -> tuple[torch.Tensor, Optional[torch.Tensor]]:
         if self.reorder_idx is None or ttype not in self.reorder_idx:
@@ -238,11 +249,11 @@ class SKVQPageCompressor:
         dtype = compressed["scale"].dtype
         return flat.reshape(B, S, H, D).transpose(1, 2).contiguous().to(dtype)
 
-    def memory_bytes(self, B: int, H: int, S: int, bits: int | float) -> dict:
+    def memory_bytes(self, B: int, H: int, S: int, bits: int | float, ttype: str = "k") -> dict:
         bits = _canonical_bits(bits)
         cbits = _container_bits(bits)
         values_per_byte = 8 // cbits
-        starts = list(range(0, self.hidden, self.group_size))
+        starts = list(range(0, self.hidden, self._group_size(ttype)))
         if not starts or starts[-1] != self.hidden:
             starts.append(self.hidden)
         q_bytes_per_token = sum(

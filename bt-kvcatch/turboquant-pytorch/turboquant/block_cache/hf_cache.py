@@ -19,7 +19,8 @@ front -- pass the cache straight into `generate()`.
 from __future__ import annotations
 
 import warnings
-from dataclasses import dataclass, field
+from collections import OrderedDict
+from dataclasses import asdict, dataclass, field
 from typing import Any, Optional
 
 import torch
@@ -64,10 +65,17 @@ class BlockCacheConfig:
     high_value_bits: float = 2
     low_key_bits: float = 2
     low_value_bits: float = 2
+    num_layers: Optional[int] = None
+    protected_layers: int = 0
+    protected_key_bits: Optional[float] = 8
+    protected_value_bits: Optional[float] = 8
     group_size: int = 128
+    key_group_size: Optional[int] = None
+    value_group_size: Optional[int] = None
     clipping: float = 0.92
     reorder_file: Optional[str] = None
     reorder_meta: Optional[dict[str, Any]] = None
+    max_cached_decompressed_blocks: int = 0
 
 
 # ---------------------------------------------------------------------------
@@ -107,9 +115,13 @@ class BlockCacheLayer(_HFCacheLayerMixin):
         self.k_compressor: Optional[BlockMSECompressor] = None
         self.v_compressor: Optional[BlockMSECompressor] = None
         self.skvq_compressor: Optional[SKVQPageCompressor] = None
+        self.tq_reorder_idx: Optional[dict[str, torch.Tensor]] = None
         self.bit_allocator: Optional[PageBitAllocator] = None
         self._k_compressors: dict[float, BlockMSECompressor] = {}
         self._v_compressors: dict[float, BlockMSECompressor] = {}
+        self._decompressed_cache: OrderedDict[
+            tuple[int, str, str], tuple[torch.Tensor, torch.Tensor]
+        ] = OrderedDict()
         self.dtype: Optional[torch.dtype] = None
         self.device: Optional[torch.device] = None
 
@@ -143,33 +155,42 @@ class BlockCacheLayer(_HFCacheLayerMixin):
         )
         return reorder_idx, group_st_idx
 
-    def lazy_initialization(
-        self, key_states: torch.Tensor, value_states: torch.Tensor
+    def _init_runtime(
+        self,
+        *,
+        batch_size: int,
+        n_kv_heads: int,
+        head_dim: int,
+        dtype: torch.dtype,
+        device: torch.device,
     ) -> None:
-        B, H, _S, D = key_states.shape
-        self.dtype = key_states.dtype
-        self.device = key_states.device
+        self.dtype = dtype
+        self.device = device
         self.table = BlockTable(
             block_size=self.cfg.block_size,
-            head_dim=D,
-            n_kv_heads=H,
-            batch_size=B,
+            head_dim=head_dim,
+            n_kv_heads=n_kv_heads,
+            batch_size=batch_size,
         )
         seed_base = self.cfg.seed + self.layer_idx * 1000
         if self.cfg.quant_backend not in ("turboquant", "skvq"):
             raise ValueError(f"unknown quant_backend: {self.cfg.quant_backend}")
 
         if self.cfg.quant_backend == "skvq":
+            self.tq_reorder_idx = None
             reorder_idx, group_st_idx = self._layer_reorder_meta()
             self.skvq_compressor = SKVQPageCompressor(
-                head_dim=D,
-                n_kv_heads=H,
+                head_dim=head_dim,
+                n_kv_heads=n_kv_heads,
                 group_size=self.cfg.group_size,
+                key_group_size=self.cfg.key_group_size,
+                value_group_size=self.cfg.value_group_size,
                 clipping=self.cfg.clipping,
                 reorder_idx=reorder_idx,
                 group_st_idx=group_st_idx,
             )
         else:
+            self.tq_reorder_idx, _ = self._layer_reorder_meta()
             self.k_compressor = self._get_turboquant_compressor(
                 "k", self.cfg.key_bits, seed_base
             )
@@ -193,6 +214,18 @@ class BlockCacheLayer(_HFCacheLayerMixin):
             )
         self.is_initialized = True
 
+    def lazy_initialization(
+        self, key_states: torch.Tensor, value_states: torch.Tensor
+    ) -> None:
+        B, H, _S, D = key_states.shape
+        self._init_runtime(
+            batch_size=B,
+            n_kv_heads=H,
+            head_dim=D,
+            dtype=key_states.dtype,
+            device=key_states.device,
+        )
+
     def _get_turboquant_compressor(
         self, ttype: str, bits: float, seed_base: Optional[int] = None
     ) -> BlockMSECompressor:
@@ -215,6 +248,80 @@ class BlockCacheLayer(_HFCacheLayerMixin):
         )
         return cache[bits_f]
 
+    def _tq_reorder_states(self, states: torch.Tensor, ttype: str) -> tuple[torch.Tensor, bool]:
+        if self.tq_reorder_idx is None or ttype not in self.tq_reorder_idx:
+            return states, False
+
+        B, H, S, D = states.shape
+        hidden = H * D
+        idx = self.tq_reorder_idx[ttype].long().to(states.device)
+        if idx.numel() != hidden:
+            raise ValueError(f"TurboQuant reorder index length {idx.numel()} != hidden {hidden}")
+
+        flat = states.transpose(1, 2).reshape(B, S, hidden)
+        reordered = flat.index_select(-1, idx)
+        return reordered.reshape(B, S, H, D).transpose(1, 2).contiguous(), True
+
+    def _tq_inverse_reorder_states(self, states: torch.Tensor, ttype: str) -> torch.Tensor:
+        if self.tq_reorder_idx is None or ttype not in self.tq_reorder_idx:
+            raise ValueError(
+                "TurboQuant compressed block was reordered, but reorder metadata is missing"
+            )
+
+        B, H, S, D = states.shape
+        hidden = H * D
+        idx = self.tq_reorder_idx[ttype].long().to(states.device)
+        if idx.numel() != hidden:
+            raise ValueError(f"TurboQuant reorder index length {idx.numel()} != hidden {hidden}")
+
+        inv_idx = idx.argsort()
+        flat = states.transpose(1, 2).reshape(B, S, hidden)
+        restored = flat.index_select(-1, inv_idx)
+        return restored.reshape(B, S, H, D).transpose(1, 2).contiguous()
+
+    def _apply_layer_protection(self, blk: KVBlock, k_bits: float, v_bits: float) -> tuple[float, float]:
+        if self.cfg.protected_layers <= 0:
+            return k_bits, v_bits
+
+        in_first = self.layer_idx < self.cfg.protected_layers
+        in_last = (
+            self.cfg.num_layers is not None
+            and self.layer_idx >= self.cfg.num_layers - self.cfg.protected_layers
+        )
+        if not (in_first or in_last):
+            return k_bits, v_bits
+
+        protected_k = (
+            self.cfg.protected_key_bits
+            if self.cfg.protected_key_bits is not None
+            else k_bits
+        )
+        protected_v = (
+            self.cfg.protected_value_bits
+            if self.cfg.protected_value_bits is not None
+            else v_bits
+        )
+        if blk.page_meta is None:
+            blk.page_meta = {}
+        else:
+            blk.page_meta = dict(blk.page_meta)
+        blk.page_meta.update(
+            {
+                "protected_layer": True,
+                "pre_protection_bits": (k_bits, v_bits),
+                "precision": "protected",
+            }
+        )
+        return float(protected_k), float(protected_v)
+
+    def _invalidate_decompressed_cache(self, block_idx: Optional[int] = None) -> None:
+        if block_idx is None:
+            self._decompressed_cache.clear()
+            return
+        for key in list(self._decompressed_cache):
+            if key[0] == block_idx:
+                del self._decompressed_cache[key]
+
     def update(
         self,
         key_states: torch.Tensor,
@@ -233,6 +340,7 @@ class BlockCacheLayer(_HFCacheLayerMixin):
             )
             for blk in to_compress:
                 k_bits, v_bits = bit_assignments[blk.block_idx]
+                k_bits, v_bits = self._apply_layer_protection(blk, k_bits, v_bits)
                 blk.key_bits = k_bits
                 blk.value_bits = v_bits
                 if self.cfg.quant_backend == "skvq":
@@ -249,29 +357,58 @@ class BlockCacheLayer(_HFCacheLayerMixin):
                         layer_idx=self.layer_idx,
                     )
                 else:
+                    work_k, reordered_k = self._tq_reorder_states(blk.fp16_k, "k")
+                    work_v, reordered_v = self._tq_reorder_states(blk.fp16_v, "v")
                     ck = self._get_turboquant_compressor("k", k_bits).compress(
-                        blk.fp16_k
+                        work_k
                     )
                     cv = self._get_turboquant_compressor("v", v_bits).compress(
-                        blk.fp16_v
+                        work_v
                     )
+                    ck["backend"] = "turboquant"
+                    cv["backend"] = "turboquant"
+                    ck["tq_reordered"] = reordered_k
+                    cv["tq_reordered"] = reordered_v
+                    ck["ttype"] = "k"
+                    cv["ttype"] = "v"
                 blk.to_compressed(ck, cv)
+                self._invalidate_decompressed_cache(blk.block_idx)
 
         return self._materialize(key_states.dtype)
 
     def _decompress_block(
         self, blk: KVBlock, dtype: torch.dtype
     ) -> tuple[torch.Tensor, torch.Tensor]:
+        cache_key = (
+            blk.block_idx,
+            str(dtype),
+            str(self.device if self.device is not None else "cpu"),
+        )
+        if self.cfg.max_cached_decompressed_blocks > 0 and cache_key in self._decompressed_cache:
+            cached = self._decompressed_cache.pop(cache_key)
+            self._decompressed_cache[cache_key] = cached
+            return cached
+
         if blk.compressed_k.get("backend") == "skvq":
             k = self.skvq_compressor.decompress(blk.compressed_k).to(dtype)
             v = self.skvq_compressor.decompress(blk.compressed_v).to(dtype)
-            return k, v
+        else:
+            k_bits = blk.key_bits if blk.key_bits is not None else self.cfg.key_bits
+            v_bits = blk.value_bits if blk.value_bits is not None else self.cfg.value_bits
+            k = self._get_turboquant_compressor("k", k_bits).decompress(blk.compressed_k)
+            v = self._get_turboquant_compressor("v", v_bits).decompress(blk.compressed_v)
+            if blk.compressed_k.get("tq_reordered", False):
+                k = self._tq_inverse_reorder_states(k, "k")
+            if blk.compressed_v.get("tq_reordered", False):
+                v = self._tq_inverse_reorder_states(v, "v")
+            k = k.to(dtype)
+            v = v.to(dtype)
 
-        k_bits = blk.key_bits if blk.key_bits is not None else self.cfg.key_bits
-        v_bits = blk.value_bits if blk.value_bits is not None else self.cfg.value_bits
-        k = self._get_turboquant_compressor("k", k_bits).decompress(blk.compressed_k)
-        v = self._get_turboquant_compressor("v", v_bits).decompress(blk.compressed_v)
-        return k.to(dtype), v.to(dtype)
+        if self.cfg.max_cached_decompressed_blocks > 0:
+            self._decompressed_cache[cache_key] = (k, v)
+            while len(self._decompressed_cache) > self.cfg.max_cached_decompressed_blocks:
+                self._decompressed_cache.popitem(last=False)
+        return k, v
 
     def _materialize(
         self, dtype: torch.dtype
@@ -288,8 +425,54 @@ class BlockCacheLayer(_HFCacheLayerMixin):
             vs.append(v)
         return torch.cat(ks, dim=2), torch.cat(vs, dim=2)
 
+    def record_attention(self, attn_weights: torch.Tensor) -> None:
+        """Accumulate attention mass per page.
+
+        Args:
+            attn_weights: attention probabilities with key length on the last
+                dimension, commonly shaped (B, H, Q, S) or (B, H, S).
+        """
+        if self.table is None or attn_weights is None:
+            return
+        if attn_weights.ndim < 2:
+            raise ValueError("attention weights must have key length on the last dim")
+
+        total_len = self.table.total_len
+        key_len = int(attn_weights.shape[-1])
+        if key_len <= 0 or total_len <= 0:
+            return
+
+        # If the supplied attention window is shorter than the cache, align it
+        # to the cache tail. This matches sliding-window attention outputs.
+        offset = max(0, total_len - key_len)
+        reduce_dims = tuple(range(attn_weights.ndim - 1))
+        token_scores = attn_weights.detach().float().sum(dim=reduce_dims).cpu()
+
+        cursor = 0
+        for blk in self.table.blocks:
+            blk_start = cursor
+            blk_end = cursor + blk.current_len
+            cursor = blk_end
+
+            overlap_start = max(blk_start, offset)
+            overlap_end = min(blk_end, offset + key_len)
+            if overlap_start >= overlap_end:
+                continue
+
+            local_start = overlap_start - offset
+            local_end = overlap_end - offset
+            mass = float(token_scores[local_start:local_end].sum().item())
+            count = float(local_end - local_start)
+
+            meta = dict(blk.page_meta) if isinstance(blk.page_meta, dict) else {}
+            meta["attention_score"] = float(meta.get("attention_score", 0.0)) + mass
+            meta["attention_count"] = float(meta.get("attention_count", 0.0)) + count
+            blk.page_meta = meta
+
     def get_mask_sizes(self, query_length: int) -> tuple[int, int]:
-        return self.get_seq_length() + query_length, 0
+        if torch.is_tensor(query_length):
+            query_length = int(query_length.item())
+        return self.get_seq_length() + int(query_length), 0
 
     def get_seq_length(self) -> int:
         return self.table.total_len if self.table is not None else 0
@@ -302,11 +485,13 @@ class BlockCacheLayer(_HFCacheLayerMixin):
     def reset(self) -> None:
         if self.table is not None:
             self.table.blocks.clear()
+        self._invalidate_decompressed_cache()
         self.is_initialized = False
 
     def reorder_cache(self, beam_idx: torch.Tensor) -> None:
         if self.table is None:
             return
+        self._invalidate_decompressed_cache()
         for blk in self.table.blocks:
             if blk.fp16_k is not None:
                 blk.fp16_k = blk.fp16_k.index_select(0, beam_idx.to(blk.fp16_k.device))
@@ -327,6 +512,7 @@ class BlockCacheLayer(_HFCacheLayerMixin):
             max_length = self.get_seq_length() + max_length
         if self.get_seq_length() <= max_length:
             return
+        self._invalidate_decompressed_cache()
 
         kept: list[KVBlock] = []
         cursor = 0
@@ -363,6 +549,7 @@ class BlockCacheLayer(_HFCacheLayerMixin):
     def batch_repeat_interleave(self, repeats: int) -> None:
         if self.table is None:
             return
+        self._invalidate_decompressed_cache()
         for blk in self.table.blocks:
             if blk.fp16_k is not None:
                 blk.fp16_k = blk.fp16_k.repeat_interleave(repeats, dim=0)
@@ -380,6 +567,7 @@ class BlockCacheLayer(_HFCacheLayerMixin):
     def batch_select_indices(self, indices: torch.Tensor) -> None:
         if self.table is None:
             return
+        self._invalidate_decompressed_cache()
         for blk in self.table.blocks:
             if blk.fp16_k is not None:
                 blk.fp16_k = blk.fp16_k[indices]
@@ -396,6 +584,102 @@ class BlockCacheLayer(_HFCacheLayerMixin):
 
     def memory_bytes(self) -> int:
         return self.table.memory_bytes() if self.table is not None else 0
+
+    def state_dict(self) -> dict[str, Any]:
+        """Serialize one layer's block table and compressed payloads."""
+        if self.table is None:
+            return {
+                "is_initialized": False,
+                "layer_idx": self.layer_idx,
+            }
+
+        blocks = []
+        for blk in self.table.blocks:
+            blocks.append(
+                {
+                    "block_idx": blk.block_idx,
+                    "state": blk.state.value,
+                    "current_len": blk.current_len,
+                    "fp16_k": blk.fp16_k,
+                    "fp16_v": blk.fp16_v,
+                    "compressed_k": blk.compressed_k,
+                    "compressed_v": blk.compressed_v,
+                    "importance": blk.importance,
+                    "key_bits": blk.key_bits,
+                    "value_bits": blk.value_bits,
+                    "page_meta": blk.page_meta,
+                }
+            )
+
+        return {
+            "is_initialized": self.is_initialized,
+            "layer_idx": self.layer_idx,
+            "dtype": self.dtype,
+            "device": str(self.device),
+            "decompressed_cache_entries": len(self._decompressed_cache),
+            "table": {
+                "block_size": self.table.block_size,
+                "head_dim": self.table.head_dim,
+                "n_kv_heads": self.table.n_kv_heads,
+                "batch_size": self.table.batch_size,
+                "blocks": blocks,
+            },
+        }
+
+    def load_state_dict(self, state: dict[str, Any]) -> None:
+        """Restore one layer from `state_dict()` output."""
+        self.layer_idx = int(state.get("layer_idx", self.layer_idx))
+        if not state.get("is_initialized", False):
+            self.table = None
+            self.is_initialized = False
+            return
+
+        table_state = state["table"]
+        dtype = state.get("dtype") or torch.float16
+        first_device = torch.device("cpu")
+        for block_state in table_state.get("blocks", []):
+            for key in ("fp16_k", "compressed_k", "compressed_v"):
+                value = block_state.get(key)
+                if torch.is_tensor(value):
+                    first_device = value.device
+                    break
+                if isinstance(value, dict):
+                    tensor = next((v for v in value.values() if torch.is_tensor(v)), None)
+                    if tensor is not None:
+                        first_device = tensor.device
+                        break
+
+        self._k_compressors.clear()
+        self._v_compressors.clear()
+        self._invalidate_decompressed_cache()
+        self._init_runtime(
+            batch_size=int(table_state["batch_size"]),
+            n_kv_heads=int(table_state["n_kv_heads"]),
+            head_dim=int(table_state["head_dim"]),
+            dtype=dtype,
+            device=first_device,
+        )
+        self.table.blocks = []
+
+        for block_state in table_state.get("blocks", []):
+            blk = KVBlock(
+                block_idx=int(block_state["block_idx"]),
+                block_size=int(table_state["block_size"]),
+                head_dim=int(table_state["head_dim"]),
+                n_kv_heads=int(table_state["n_kv_heads"]),
+                batch_size=int(table_state["batch_size"]),
+                state=BlockState(block_state["state"]),
+                current_len=int(block_state["current_len"]),
+                fp16_k=block_state.get("fp16_k"),
+                fp16_v=block_state.get("fp16_v"),
+                compressed_k=block_state.get("compressed_k"),
+                compressed_v=block_state.get("compressed_v"),
+                importance=float(block_state.get("importance", 0.0)),
+                key_bits=block_state.get("key_bits"),
+                value_bits=block_state.get("value_bits"),
+                page_meta=block_state.get("page_meta"),
+            )
+            self.table.blocks.append(blk)
 
 
 # ---------------------------------------------------------------------------
@@ -478,6 +762,42 @@ class BlockKVCache(_HFCache):
         self.layers = []
         self._seen_tokens = 0
 
+    def record_attention(self, layer_idx: int, attn_weights: torch.Tensor) -> None:
+        """Record attention probabilities for later page-importance scoring.
+
+        This explicit API is intentionally conservative: evaluation scripts or
+        future model hooks can pass attention probabilities here without
+        monkey-patching attention modules.
+        """
+        if layer_idx >= len(self.layers):
+            return
+        self.layers[layer_idx].record_attention(attn_weights)
+
+    def record_attentions(self, attentions: Any) -> None:
+        """Record a HuggingFace attentions object.
+
+        Handles both ordinary forward outputs shaped like
+        `tuple[layer](B, H, Q, S)` and generation outputs shaped like
+        `tuple[step][layer](B, H, Q, S)`.
+        """
+        if attentions is None:
+            return
+        if torch.is_tensor(attentions):
+            self.record_attention(0, attentions)
+            return
+        if not isinstance(attentions, (list, tuple)) or len(attentions) == 0:
+            return
+
+        first = attentions[0]
+        if isinstance(first, (list, tuple)):
+            for step_attentions in attentions:
+                self.record_attentions(step_attentions)
+            return
+
+        for layer_idx, attn_weights in enumerate(attentions):
+            if torch.is_tensor(attn_weights):
+                self.record_attention(layer_idx, attn_weights)
+
     # ----- diagnostics -----
 
     def memory_report(self) -> dict[str, Any]:
@@ -531,3 +851,34 @@ class BlockKVCache(_HFCache):
             "bit_histogram": bit_histogram,
             "precision_histogram": precision_histogram,
         }
+
+    def state_dict(self) -> dict[str, Any]:
+        """Serialize the cache payload.
+
+        Restore into a `BlockKVCache` constructed with a compatible
+        `BlockCacheConfig`. The config snapshot is included for diagnostics,
+        but `load_state_dict()` intentionally does not replace `self.config`.
+        """
+        config_snapshot = asdict(self.config)
+        config_snapshot["policy"] = type(self.config.policy).__name__
+        return {
+            "format": "BlockKVCache.v1",
+            "seen_tokens": self._seen_tokens,
+            "config": config_snapshot,
+            "layers": [layer.state_dict() for layer in self.layers],
+        }
+
+    def load_state_dict(self, state: dict[str, Any]) -> None:
+        if state.get("format") not in (None, "BlockKVCache.v1"):
+            raise ValueError(f"unsupported BlockKVCache state format: {state.get('format')}")
+
+        self.layers = []
+        for layer_state in state.get("layers", []):
+            layer = BlockCacheLayer(
+                self.config,
+                layer_idx=int(layer_state.get("layer_idx", len(self.layers))),
+                reorder_meta=self._reorder_meta,
+            )
+            layer.load_state_dict(layer_state)
+            self.layers.append(layer)
+        self._seen_tokens = int(state.get("seen_tokens", 0))

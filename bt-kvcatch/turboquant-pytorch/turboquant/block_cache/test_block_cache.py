@@ -13,6 +13,7 @@ from turboquant.block_cache import (
     BlockKVCache,
     BlockState,
     BlockTable,
+    GroupingPolicy,
     HybridPolicy,
     SKVQPageCompressor,
     TokenBlockPolicy,
@@ -221,6 +222,25 @@ def test_skvq_page_compressor_reorder_roundtrip():
     print(f"ok: test_skvq_page_compressor_reorder_roundtrip  err={err.item():.4f}")
 
 
+def test_skvq_page_compressor_asymmetric_group_size():
+    cmp = SKVQPageCompressor(
+        head_dim=16,
+        n_kv_heads=2,
+        group_size=16,
+        key_group_size=8,
+        value_group_size=32,
+        clipping=1.0,
+    )
+    k, v = _kv(1, 2, 8, 16, dtype=torch.float32)
+    ck = cmp.compress(k, bits=4, ttype="k", layer_idx=0)
+    cv = cmp.compress(v, bits=4, ttype="v", layer_idx=0)
+    assert ck["group_widths"] == [8, 8, 8, 8]
+    assert cv["group_widths"] == [32]
+    assert cmp.decompress(ck).shape == k.shape
+    assert cmp.decompress(cv).shape == v.shape
+    print("ok: test_skvq_page_compressor_asymmetric_group_size")
+
+
 def test_block_kv_cache_skvq_mixed_precision_pages():
     cache = BlockKVCache(BlockCacheConfig(
         block_size=4,
@@ -283,6 +303,229 @@ def test_block_kv_cache_skvq_reorder_metadata():
     print(f"ok: test_block_kv_cache_skvq_reorder_metadata  err={err.item():.4f}")
 
 
+def test_block_kv_cache_turboquant_reorder_metadata():
+    hidden = 16
+    idx = torch.arange(hidden - 1, -1, -1)
+    reorder_meta = {
+        "reorder_indices": [(idx, idx)],
+    }
+    cfg = BlockCacheConfig(
+        block_size=4,
+        key_bits=8,
+        value_bits=8,
+        policy=TokenBlockPolicy(),
+        quant_backend="turboquant",
+        reorder_meta=reorder_meta,
+    )
+    cache = BlockKVCache(cfg)
+    k, v = _kv(1, 2, 8, 8)
+    full_k, full_v = cache.update(k, v, layer_idx=0)
+    blocks = cache.layers[0].table.blocks
+    err = (full_k.float() - k.float()).norm() / k.float().norm()
+
+    assert full_k.shape == k.shape
+    assert full_v.shape == v.shape
+    assert all(b.compressed_k["backend"] == "turboquant" for b in blocks)
+    assert all(b.compressed_k["tq_reordered"] for b in blocks)
+    assert cache.layers[0].tq_reorder_idx["k"].equal(idx)
+    assert err.item() < 0.2, f"TurboQuant cache reorder error too high: {err.item()}"
+
+    restored = BlockKVCache(cfg)
+    restored.load_state_dict(cache.state_dict())
+    restored_k, _ = restored.layers[0]._materialize(dtype=torch.float16)
+    assert torch.allclose(restored_k, full_k, atol=0, rtol=0)
+    print(f"ok: test_block_kv_cache_turboquant_reorder_metadata  err={err.item():.4f}")
+
+
+def test_block_kv_cache_protected_layers_override_bits():
+    cache = BlockKVCache(BlockCacheConfig(
+        block_size=4,
+        key_bits=2,
+        value_bits=2,
+        policy=TokenBlockPolicy(),
+        quant_backend="turboquant",
+        num_layers=4,
+        protected_layers=1,
+        protected_key_bits=8,
+        protected_value_bits=4,
+    ))
+    k, v = _kv(1, 2, 8, 8)
+    cache.update(k, v, layer_idx=0)
+    cache.update(k, v, layer_idx=1)
+    cache.update(k, v, layer_idx=3)
+
+    protected_first = cache.layers[0].table.blocks[0]
+    middle = cache.layers[1].table.blocks[0]
+    protected_last = cache.layers[3].table.blocks[0]
+
+    assert (protected_first.key_bits, protected_first.value_bits) == (8.0, 4.0)
+    assert (middle.key_bits, middle.value_bits) == (2.0, 2.0)
+    assert (protected_last.key_bits, protected_last.value_bits) == (8.0, 4.0)
+    assert protected_first.page_meta["precision"] == "protected"
+    assert protected_last.page_meta["precision"] == "protected"
+
+    report = cache.memory_report()
+    assert report["bit_histogram"]["K8.0/V4.0"] == 4
+    assert report["bit_histogram"]["K2.0/V2.0"] == 2
+    assert report["precision_histogram"]["protected"] == 4
+    print("ok: test_block_kv_cache_protected_layers_override_bits")
+
+
+class DeferredPolicy(GroupingPolicy):
+    def __init__(self):
+        self.enabled = False
+
+    def on_seal(self, sealed, table):
+        if not self.enabled:
+            return []
+        return [blk for blk in table.blocks if blk.state == BlockState.SEALED]
+
+
+def test_attention_score_importance_drives_mixed_precision():
+    policy = DeferredPolicy()
+    cache = BlockKVCache(BlockCacheConfig(
+        block_size=4,
+        key_bits=2,
+        value_bits=2,
+        policy=policy,
+        quant_backend="turboquant",
+        mixed_precision=True,
+        importance_metric="attention_score",
+        important_ratio=0.25,
+        high_key_bits=4,
+        high_value_bits=4,
+        low_key_bits=2,
+        low_value_bits=2,
+    ))
+
+    k, v = _kv(1, 2, 12, 8)
+    cache.update(k, v, layer_idx=0)
+
+    # Three sealed pages are still FP16. Give the first page most attention.
+    attn = torch.zeros(1, 1, 1, 12)
+    attn[..., 0:4] = 1.0
+    attn[..., 4:8] = 0.1
+    attn[..., 8:12] = 0.01
+    cache.record_attention(0, attn)
+
+    policy.enabled = True
+    k1, v1 = _kv(1, 2, 4, 8)
+    cache.update(k1, v1, layer_idx=0)
+
+    blocks = cache.layers[0].table.blocks
+    assert all(blk.state == BlockState.COMPRESSED for blk in blocks)
+    assert blocks[0].page_meta["precision"] == "high"
+    assert (blocks[0].key_bits, blocks[0].value_bits) == (4.0, 4.0)
+    assert all((blk.key_bits, blk.value_bits) == (2.0, 2.0) for blk in blocks[1:])
+    print("ok: test_attention_score_importance_drives_mixed_precision")
+
+
+def test_record_attentions_accepts_hf_tuple_shapes():
+    cache = BlockKVCache(BlockCacheConfig(
+        block_size=4,
+        key_bits=2,
+        value_bits=2,
+        policy=DeferredPolicy(),
+    ))
+    k, v = _kv(1, 2, 8, 8)
+    cache.update(k, v, layer_idx=0)
+    cache.update(k, v, layer_idx=1)
+
+    layer0 = torch.zeros(1, 1, 1, 8)
+    layer1 = torch.zeros(1, 1, 1, 8)
+    layer0[..., :4] = 1.0
+    layer1[..., 4:] = 1.0
+    cache.record_attentions((layer0, layer1))
+
+    assert cache.layers[0].table.blocks[0].page_meta["attention_score"] == 4.0
+    assert cache.layers[1].table.blocks[1].page_meta["attention_score"] == 4.0
+
+    cache.record_attentions(((layer0, layer1),))
+    assert cache.layers[0].table.blocks[0].page_meta["attention_score"] == 8.0
+    assert cache.layers[1].table.blocks[1].page_meta["attention_score"] == 8.0
+    print("ok: test_record_attentions_accepts_hf_tuple_shapes")
+
+
+def test_block_kv_cache_state_dict_roundtrip_and_continue():
+    cfg = BlockCacheConfig(
+        block_size=4,
+        key_bits=4,
+        value_bits=4,
+        policy=TokenBlockPolicy(),
+        quant_backend="turboquant",
+    )
+    cache = BlockKVCache(cfg)
+    k, v = _kv(1, 2, 10, 8)
+    full_k, full_v = cache.update(k, v, layer_idx=0)
+    before = cache.memory_report()
+
+    restored = BlockKVCache(cfg)
+    restored.load_state_dict(cache.state_dict())
+    restored_k, restored_v = restored.layers[0]._materialize(dtype=torch.float16)
+
+    assert restored.seen_tokens == cache.seen_tokens
+    assert restored.memory_report() == before
+    assert torch.allclose(restored_k, full_k, atol=0, rtol=0)
+    assert torch.allclose(restored_v, full_v, atol=0, rtol=0)
+
+    k1, v1 = _kv(1, 2, 1, 8)
+    next_k, next_v = restored.update(k1, v1, layer_idx=0)
+    assert next_k.shape == (1, 2, 11, 8)
+    assert next_v.shape == (1, 2, 11, 8)
+    assert restored.get_seq_length(0) == 11
+    print("ok: test_block_kv_cache_state_dict_roundtrip_and_continue")
+
+
+def test_block_kv_cache_state_dict_skvq_roundtrip():
+    cfg = BlockCacheConfig(
+        block_size=4,
+        key_bits=2,
+        value_bits=1.5,
+        policy=TokenBlockPolicy(),
+        quant_backend="skvq",
+        group_size=8,
+        clipping=1.0,
+    )
+    cache = BlockKVCache(cfg)
+    k, v = _kv(1, 2, 8, 8)
+    full_k, full_v = cache.update(k, v, layer_idx=0)
+
+    restored = BlockKVCache(cfg)
+    restored.load_state_dict(cache.state_dict())
+    restored_k, restored_v = restored.layers[0]._materialize(dtype=torch.float16)
+
+    assert restored.memory_report() == cache.memory_report()
+    assert torch.allclose(restored_k, full_k, atol=0, rtol=0)
+    assert torch.allclose(restored_v, full_v, atol=0, rtol=0)
+    print("ok: test_block_kv_cache_state_dict_skvq_roundtrip")
+
+
+def test_decompressed_block_cache_lru_and_invalidation():
+    cache = BlockKVCache(BlockCacheConfig(
+        block_size=4,
+        key_bits=4,
+        value_bits=4,
+        policy=TokenBlockPolicy(),
+        quant_backend="turboquant",
+        max_cached_decompressed_blocks=1,
+    ))
+    k, v = _kv(2, 2, 12, 8)
+    cache.update(k, v, layer_idx=0)
+    layer = cache.layers[0]
+
+    assert len(layer._decompressed_cache) == 1
+    layer._materialize(dtype=torch.float16)
+    assert len(layer._decompressed_cache) == 1
+
+    layer.reorder_cache(torch.tensor([1, 0]))
+    assert len(layer._decompressed_cache) == 0
+    layer._materialize(dtype=torch.float16)
+    assert len(layer._decompressed_cache) == 1
+    layer.crop(8)
+    assert len(layer._decompressed_cache) == 0
+    print("ok: test_decompressed_block_cache_lru_and_invalidation")
+
+
 def main():
     test_block_table_splits_into_blocks()
     test_token_block_policy_compresses_all_sealed()
@@ -296,8 +539,16 @@ def main():
     test_reorder_cache_permutes_batch()
     test_skvq_page_compressor_roundtrip()
     test_skvq_page_compressor_reorder_roundtrip()
+    test_skvq_page_compressor_asymmetric_group_size()
     test_block_kv_cache_skvq_mixed_precision_pages()
     test_block_kv_cache_skvq_reorder_metadata()
+    test_block_kv_cache_turboquant_reorder_metadata()
+    test_block_kv_cache_protected_layers_override_bits()
+    test_attention_score_importance_drives_mixed_precision()
+    test_record_attentions_accepts_hf_tuple_shapes()
+    test_block_kv_cache_state_dict_roundtrip_and_continue()
+    test_block_kv_cache_state_dict_skvq_roundtrip()
+    test_decompressed_block_cache_lru_and_invalidation()
     print("\nAll block_cache tests passed.")
 
 

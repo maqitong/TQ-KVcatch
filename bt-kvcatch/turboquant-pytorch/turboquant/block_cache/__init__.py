@@ -15,6 +15,8 @@ from .page_importance import (
     PageImportanceScorer,
     NormPageImportanceScorer,
     RandomPageImportanceScorer,
+    AttentionScorePageImportanceScorer,
+    VKRatioPageImportanceScorer,
 )
 from .bit_allocator import (
     PageBitAllocator,
@@ -36,6 +38,8 @@ __all__ = [
     "PageImportanceScorer",
     "NormPageImportanceScorer",
     "RandomPageImportanceScorer",
+    "AttentionScorePageImportanceScorer",
+    "VKRatioPageImportanceScorer",
     "PageBitAllocator",
     "FixedPageBitAllocator",
     "TopRatioPageBitAllocator",
