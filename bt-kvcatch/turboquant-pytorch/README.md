@@ -72,7 +72,7 @@ python -m turboquant.block_cache.eval_niah `
   --window 32
 ```
 
-Run the 5-method main comparison:
+Run the formal main comparison with baselines:
 
 ```powershell
 python -m turboquant.block_cache.experiment_main `
@@ -249,7 +249,7 @@ Main files:
 - `turboquant/block_cache/quantizer.py`: TurboQuant page compressor wrapper.
 - `turboquant/block_cache/skvq_quantizer.py`: SKVQ group-wise compressor with reorder and 1.5-bit support.
 - `turboquant/block_cache/calibration.py`: K/V projection stats to reorder metadata.
-- `turboquant/block_cache/experiment_main.py`: 5-method core comparison.
+- `turboquant/block_cache/experiment_main.py`: formal baseline + method comparison.
 - `turboquant/block_cache/ablation.py`: parameter sweep runner.
 - `turboquant/block_cache/profile_memory.py`: CUDA memory and latency profiler.
 - `BlockKVCache.state_dict/load_state_dict`: cache save/load for reproducibility.

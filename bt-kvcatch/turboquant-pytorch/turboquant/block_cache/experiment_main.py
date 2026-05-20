@@ -4,10 +4,11 @@ This script is the M1.4 entry point from `tasks/kvcatch_completion_plan.md`.
 It runs a compact Needle-in-a-Haystack comparison across the core methods:
 
   1. FP16 / DynamicCache
-  2. SKVQ-flat / TokenBlockPolicy + SKVQ
-  3. Hybrid + SKVQ + Block
-  4. Hybrid + TurboQuant + Block
-  5. Hybrid + TurboQuant + Block + page-level mixed precision
+  2. SKVQ Baseline / TokenBlockPolicy + SKVQ
+  3. TurboQuant Baseline / TokenBlockPolicy + TurboQuant
+  4. Hybrid + SKVQ + Block
+  5. Hybrid + TurboQuant + Block
+  6. Hybrid + TurboQuant + Block + page-level mixed precision
 
 The default settings are intentionally modest so the script can be smoke-tested
 locally, then scaled up on a 4090 server by increasing context lengths,
@@ -41,6 +42,8 @@ class MethodSpec:
     backend: str
     quant_backend: str | None
     policy: str
+    method_group: str = "method"
+    page_quant_scheme: str = "none"
     mixed_precision: bool = False
     importance_metric: str = "k_norm"
     key_bits: float = 2
@@ -114,18 +117,37 @@ def _policy_from_name(name: str, args):
 
 
 def build_methods(args) -> list[MethodSpec]:
+    baseline_scheme = f"Uniform K{args.key_bits}/V{args.value_bits}"
+    mix_scheme = (
+        f"Mixed high K{args.high_key_bits}/V{args.high_value_bits}, "
+        f"low K{args.low_key_bits}/V{args.low_value_bits}"
+    )
     methods = [
         MethodSpec(
             name="FP16",
             backend="dynamic",
             quant_backend=None,
             policy="none",
+            method_group="reference",
+            page_quant_scheme="FP16",
         ),
         MethodSpec(
-            name="SKVQ-flat",
+            name="SKVQ Baseline",
             backend="block_skvq",
             quant_backend="skvq",
             policy="token",
+            method_group="baseline",
+            page_quant_scheme=baseline_scheme,
+            key_bits=args.key_bits,
+            value_bits=args.value_bits,
+        ),
+        MethodSpec(
+            name="TurboQuant Baseline",
+            backend="block_tq",
+            quant_backend="turboquant",
+            policy="token",
+            method_group="baseline",
+            page_quant_scheme=baseline_scheme,
             key_bits=args.key_bits,
             value_bits=args.value_bits,
         ),
@@ -134,6 +156,8 @@ def build_methods(args) -> list[MethodSpec]:
             backend="block_skvq",
             quant_backend="skvq",
             policy="hybrid",
+            method_group="method",
+            page_quant_scheme=baseline_scheme,
             key_bits=args.key_bits,
             value_bits=args.value_bits,
         ),
@@ -142,14 +166,18 @@ def build_methods(args) -> list[MethodSpec]:
             backend="block_tq",
             quant_backend="turboquant",
             policy="hybrid",
+            method_group="method",
+            page_quant_scheme=baseline_scheme,
             key_bits=args.key_bits,
             value_bits=args.value_bits,
         ),
         MethodSpec(
-            name="Hybrid+TQ+Block+Mix",
+            name="Hybrid+TQ+Block+PageMix",
             backend="block_tq_mix",
             quant_backend="turboquant",
             policy="hybrid",
+            method_group="method",
+            page_quant_scheme=mix_scheme,
             mixed_precision=True,
             importance_metric=args.importance_metric,
             key_bits=args.key_bits,
@@ -167,6 +195,8 @@ def build_methods(args) -> list[MethodSpec]:
                 backend="block_tq_random_mix",
                 quant_backend="turboquant",
                 policy="hybrid",
+                method_group="ablation",
+                page_quant_scheme=mix_scheme,
                 mixed_precision=True,
                 importance_metric="random",
                 key_bits=args.key_bits,
@@ -284,10 +314,12 @@ def run_niah_case(
         precision_histogram=report["precision_histogram"] if report else None,
         config={
             "block_size": args.block_size,
+            "method_group": method.method_group,
             "sink": args.sink if method.policy == "hybrid" else None,
             "window": args.window if method.policy == "hybrid" else None,
             "policy": method.policy,
             "quant_backend": method.quant_backend,
+            "page_quant_scheme": method.page_quant_scheme,
             "key_bits": method.key_bits,
             "value_bits": method.value_bits,
             "mixed_precision": method.mixed_precision,
@@ -324,6 +356,10 @@ def _write_outputs(results: list[MainResult], args) -> None:
         writer.writerow(
             [
                 "method",
+                "method_group",
+                "quant_backend",
+                "policy",
+                "page_quant_scheme",
                 "context_length",
                 "position",
                 "seed",
@@ -338,6 +374,10 @@ def _write_outputs(results: list[MainResult], args) -> None:
             writer.writerow(
                 [
                     r.method,
+                    r.config.get("method_group"),
+                    r.config.get("quant_backend"),
+                    r.config.get("policy"),
+                    r.config.get("page_quant_scheme"),
                     r.context_length,
                     r.position,
                     r.seed,
@@ -360,8 +400,8 @@ def _write_outputs(results: list[MainResult], args) -> None:
         "",
         "## NIAH Summary",
         "",
-        "| Method | Context | Found | Total | Found Rate | Avg Ratio | Avg Seconds |",
-        "|---|---:|---:|---:|---:|---:|---:|",
+        "| Method | Group | Policy | Scheme | Context | Found | Total | Found Rate | Avg Ratio | Avg Seconds |",
+        "|---|---|---|---|---:|---:|---:|---:|---:|---:|",
     ]
     for (method, context), group in sorted(
         grouped.items(), key=lambda item: (item[0][1], method_order.get(item[0][0], 999))
@@ -372,9 +412,12 @@ def _write_outputs(results: list[MainResult], args) -> None:
         avg_ratio = sum(ratios) / len(ratios) if ratios else None
         avg_seconds = sum(r.seconds for r in group) / total
         ratio_cell = f"{avg_ratio:.3f}" if avg_ratio is not None else "-"
+        group_name = group[0].config.get("method_group", "-")
+        policy = group[0].config.get("policy", "-")
+        scheme = group[0].config.get("page_quant_scheme", "-")
         lines.append(
-            f"| {method} | {context} | {found} | {total} | "
-            f"{found / total:.3f} | {ratio_cell} | {avg_seconds:.3f} |"
+            f"| {method} | {group_name} | {policy} | {scheme} | {context} | "
+            f"{found} | {total} | {found / total:.3f} | {ratio_cell} | {avg_seconds:.3f} |"
         )
 
     lines.extend(
