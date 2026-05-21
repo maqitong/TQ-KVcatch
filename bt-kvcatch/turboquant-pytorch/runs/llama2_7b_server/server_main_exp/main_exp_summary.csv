@@ -243,3 +243,39 @@ Question: What is"
 SKVQ skvq_baseline (native),paper_baseline,skvq,sliding_window,Uniform K2/V2,4096,0.9,2,0,,2.5370,4022,"The secret project milestones, scheduling details, and meeting summaries.
 
 The report included ordinary project milestones, scheduling details, and"
+"TurboQuant V3 flat (rw=128, K2/V2)",paper_baseline,,v3_flat,V3 flat K2/V2,2048,0.1,0,1,7.529411764705882,2.7809,1972,AURORA-7749.
+"TurboQuant V3 flat (rw=128, K2/V2)",paper_baseline,,v3_flat,V3 flat K2/V2,2048,0.1,1,0,7.529411764705882,2.0745,2018,AURORA-786.
+"TurboQuant V3 flat (rw=128, K2/V2)",paper_baseline,,v3_flat,V3 flat K2/V2,2048,0.1,2,0,7.529411764705882,2.1515,1972,AURORA-782.
+"TurboQuant V3 flat (rw=128, K2/V2)",paper_baseline,,v3_flat,V3 flat K2/V2,2048,0.5,0,0,7.529411764705882,2.0833,1972,AURORA-779.
+"TurboQuant V3 flat (rw=128, K2/V2)",paper_baseline,,v3_flat,V3 flat K2/V2,2048,0.5,1,0,7.529411764705882,1.9449,2018,AURORA-776
+"TurboQuant V3 flat (rw=128, K2/V2)",paper_baseline,,v3_flat,V3 flat K2/V2,2048,0.5,2,0,7.529411764705882,2.1156,1972,AURORA-723
+"TurboQuant V3 flat (rw=128, K2/V2)",paper_baseline,,v3_flat,V3 flat K2/V2,2048,0.9,0,0,7.529411764705882,2.0448,1972,AURORA-749.
+"TurboQuant V3 flat (rw=128, K2/V2)",paper_baseline,,v3_flat,V3 flat K2/V2,2048,0.9,1,0,7.529411764705882,2.3185,2018,AURORA-776
+"TurboQuant V3 flat (rw=128, K2/V2)",paper_baseline,,v3_flat,V3 flat K2/V2,2048,0.9,2,0,7.529411764705882,2.0910,1972,AURORA-782.
+"TurboQuant V3 flat (rw=128, K2/V2)",paper_baseline,,v3_flat,V3 flat K2/V2,4096,0.1,0,0,7.529411764705882,3.1096,4022,AURORA-749.
+"TurboQuant V3 flat (rw=128, K2/V2)",paper_baseline,,v3_flat,V3 flat K2/V2,4096,0.1,1,0,7.529411764705882,2.7348,4118,AURORA-78.
+"TurboQuant V3 flat (rw=128, K2/V2)",paper_baseline,,v3_flat,V3 flat K2/V2,4096,0.1,2,0,7.529411764705882,3.0047,4022,AURORA-782.
+"TurboQuant V3 flat (rw=128, K2/V2)",paper_baseline,,v3_flat,V3 flat K2/V2,4096,0.5,0,0,7.529411764705882,2.9730,4022,AURORA-749
+"TurboQuant V3 flat (rw=128, K2/V2)",paper_baseline,,v3_flat,V3 flat K2/V2,4096,0.5,1,0,7.529411764705882,2.9091,4118,AURORA-786.
+"TurboQuant V3 flat (rw=128, K2/V2)",paper_baseline,,v3_flat,V3 flat K2/V2,4096,0.5,2,1,7.529411764705882,3.0329,4022,AURORA-7823.
+"TurboQuant V3 flat (rw=128, K2/V2)",paper_baseline,,v3_flat,V3 flat K2/V2,4096,0.9,0,0,7.529411764705882,2.8371,4022,AURORA-749.
+"TurboQuant V3 flat (rw=128, K2/V2)",paper_baseline,,v3_flat,V3 flat K2/V2,4096,0.9,1,1,7.529411764705882,2.9311,4118,AURORA-7786
+"TurboQuant V3 flat (rw=128, K2/V2)",paper_baseline,,v3_flat,V3 flat K2/V2,4096,0.9,2,1,7.529411764705882,3.0702,4022,AURORA-7823.
+TurboQuant pure+PageMix,paper_baseline,turboquant,hybrid,"Mixed high K4/V4, low K2/V2",2048,0.1,0,0,4.0091070073362,28.1375,1972,AURORA-774.
+TurboQuant pure+PageMix,paper_baseline,turboquant,hybrid,"Mixed high K4/V4, low K2/V2",2048,0.1,1,1,4.035820895522388,28.8294,2018,AURORA-7786.
+TurboQuant pure+PageMix,paper_baseline,turboquant,hybrid,"Mixed high K4/V4, low K2/V2",2048,0.1,2,1,4.003029537995456,28.2628,1972,AURORA-7823.
+TurboQuant pure+PageMix,paper_baseline,turboquant,hybrid,"Mixed high K4/V4, low K2/V2",2048,0.5,0,1,4.003029537995456,28.9731,1972,AURORA-7749.
+TurboQuant pure+PageMix,paper_baseline,turboquant,hybrid,"Mixed high K4/V4, low K2/V2",2048,0.5,1,1,4.035820895522388,29.2942,2018,AURORA-7786.
+TurboQuant pure+PageMix,paper_baseline,turboquant,hybrid,"Mixed high K4/V4, low K2/V2",2048,0.5,2,1,4.003029537995456,28.4831,1972,AURORA-7823.
+TurboQuant pure+PageMix,paper_baseline,turboquant,hybrid,"Mixed high K4/V4, low K2/V2",2048,0.9,0,1,4.003029537995456,28.1565,1972,AURORA-7749.
+TurboQuant pure+PageMix,paper_baseline,turboquant,hybrid,"Mixed high K4/V4, low K2/V2",2048,0.9,1,1,4.035820895522388,28.5571,2018,AURORA-7786.
+TurboQuant pure+PageMix,paper_baseline,turboquant,hybrid,"Mixed high K4/V4, low K2/V2",2048,0.9,2,1,4.003029537995456,28.4277,1972,AURORA-7823.
+TurboQuant pure+PageMix,paper_baseline,turboquant,hybrid,"Mixed high K4/V4, low K2/V2",4096,0.1,0,0,4.542611635441611,41.2052,4022,AURORA-777.
+TurboQuant pure+PageMix,paper_baseline,turboquant,hybrid,"Mixed high K4/V4, low K2/V2",4096,0.1,1,0,4.609715242881072,40.7464,4118,AURORA-7789.
+TurboQuant pure+PageMix,paper_baseline,turboquant,hybrid,"Mixed high K4/V4, low K2/V2",4096,0.1,2,1,4.598802395209581,40.2168,4022,AURORA-7823.
+TurboQuant pure+PageMix,paper_baseline,turboquant,hybrid,"Mixed high K4/V4, low K2/V2",4096,0.5,0,1,4.598802395209581,40.3325,4022,AURORA-7749.
+TurboQuant pure+PageMix,paper_baseline,turboquant,hybrid,"Mixed high K4/V4, low K2/V2",4096,0.5,1,1,4.609715242881072,41.5211,4118,AURORA-7786.
+TurboQuant pure+PageMix,paper_baseline,turboquant,hybrid,"Mixed high K4/V4, low K2/V2",4096,0.5,2,1,4.598802395209581,40.1313,4022,AURORA-7823.
+TurboQuant pure+PageMix,paper_baseline,turboquant,hybrid,"Mixed high K4/V4, low K2/V2",4096,0.9,0,1,4.598802395209581,41.2478,4022,AURORA-7749.
+TurboQuant pure+PageMix,paper_baseline,turboquant,hybrid,"Mixed high K4/V4, low K2/V2",4096,0.9,1,0,4.554559249551662,39.3024,4118,AURORA-786.
+TurboQuant pure+PageMix,paper_baseline,turboquant,hybrid,"Mixed high K4/V4, low K2/V2",4096,0.9,2,1,4.598802395209581,41.0488,4022,AURORA-7823.

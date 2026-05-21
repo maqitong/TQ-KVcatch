@@ -53,9 +53,9 @@ def export_ppl() -> list[str]:
         return lines
 
     header = (
-        "| 方法 | K bpw | V bpw | avg bpw | eff bpw | 压缩比 | PPL | 量化说明 |"
+        "| 方法 | K bpw | V bpw | avg bpw | eff bpw | ratio | PPL | 量化说明 |"
     )
-    sep = "|------|------:|------:|--------:|--------:|-------:|----:|----------|"
+    sep = "|------|------:|------:|--------:|--------:|------:|----:|----------|"
     lines.extend([header, sep])
     for row in rows:
         cfg = row.get("config", {})
@@ -79,11 +79,30 @@ def _quant_scheme_note(row: dict) -> str:
     backend = row.get("backend", "")
     if backend == "dynamic":
         return "FP16 K16/V16"
+    if cfg.get("paper_baseline") == "tq_pure_mix":
+        r = cfg.get("important_ratio", 0.3)
+        hk, hv = cfg.get("high_key_bits", 4), cfg.get("high_value_bits", 4)
+        lk, lv = cfg.get("low_key_bits", 2), cfg.get("low_value_bits", 2)
+        pl = cfg.get("protected_layers", 1)
+        pk = cfg.get("protected_key_bits", 8)
+        pv = cfg.get("protected_value_bits", 8)
+        return (
+            f"PageMix top {r:.0%}: K/V high {hk}/{hv}, low {lk}/{lv} (k_norm); "
+            f"protect layer0 K{pk}/V{pv}"
+        )
     if cfg.get("mixed") or cfg.get("mixed_precision"):
         r = cfg.get("important_ratio", 0.3)
         hk, hv = cfg.get("high_key_bits", 4), cfg.get("high_value_bits", 4)
         lk, lv = cfg.get("low_key_bits", 2), cfg.get("low_value_bits", 2)
         m = cfg.get("importance_metric", "k_norm")
+        pl = cfg.get("protected_layers", 0)
+        if pl and pl > 0:
+            pk = cfg.get("protected_key_bits", 8)
+            pv = cfg.get("protected_value_bits", 8)
+            return (
+                f"PageMix top {r:.0%}: K/V high {hk}/{hv}, low {lk}/{lv} ({m}); "
+                f"protect layer0 K{pk}/V{pv}"
+            )
         return f"PageMix top {r:.0%}: K/V high {hk}/{hv}, low {lk}/{lv} ({m})"
     kb = cfg.get("key_bits", 2)
     vb = cfg.get("value_bits", 2)
@@ -92,6 +111,36 @@ def _quant_scheme_note(row: dict) -> str:
     if cfg.get("paper_baseline") == "tq_pure" or cfg.get("reorder") is False:
         return f"TurboQuant uniform K{kb}/V{vb}, no reorder"
     return f"Uniform K{kb}/V{vb}"
+
+
+def _niah_stats(group: list[dict]) -> dict:
+    sample = group[0]
+    bpw = row_with_bpw(sample)
+    found = sum(int(x["found"]) for x in group)
+    ratios = [x.get("compression_ratio") for x in group if x.get("compression_ratio")]
+    avg_r = sum(ratios) / len(ratios) if ratios else None
+    eff = None
+    if avg_r is not None:
+        from turboquant.block_cache.bpw_metrics import effective_bpw_kv_pair
+
+        eff = effective_bpw_kv_pair(avg_r)
+    by_ctx: dict[int, list] = defaultdict(list)
+    for r in group:
+        by_ctx[int(r["context_length"])].append(r)
+    ctx_cells = []
+    for ctx in sorted(by_ctx):
+        g = by_ctx[ctx]
+        f = sum(int(x["found"]) for x in g)
+        ctx_cells.append(f"{ctx}:{f}/{len(g)}")
+    return {
+        "bpw": bpw,
+        "found": found,
+        "n": len(group),
+        "found_pct": 100 * found / len(group) if group else 0,
+        "avg_r": avg_r,
+        "eff": eff,
+        "ctx_breakdown": ", ".join(ctx_cells),
+    }
 
 
 def export_niah() -> list[str]:
@@ -105,32 +154,79 @@ def export_niah() -> list[str]:
     for r in raw:
         by_method[r["method"]].append(r)
 
-    header = "| 方法 | K bpw | V bpw | avg bpw | eff bpw | Found率 | 条数 |"
-    sep = "|------|------:|------:|--------:|--------:|--------:|-----:|"
+    header = "| 方法 | K bpw | V bpw | avg bpw | eff bpw | ratio | Found率 | 条数 |"
+    sep = "|------|------:|------:|--------:|--------:|------:|--------:|-----:|"
     lines.extend([header, sep])
 
     for method in sorted(by_method.keys()):
-        group = by_method[method]
-        sample = group[0]
-        bpw = row_with_bpw(sample)
-        found = sum(int(x["found"]) for x in group)
-        ratios = [x.get("compression_ratio") for x in group if x.get("compression_ratio")]
-        eff = None
-        if ratios:
-            avg_r = sum(ratios) / len(ratios)
-            from turboquant.block_cache.bpw_metrics import effective_bpw_kv_pair
-
-            eff = effective_bpw_kv_pair(avg_r)
+        st = _niah_stats(by_method[method])
         lines.append(
             f"| {method} "
-            f"| {bpw['k_bpw']} "
-            f"| {bpw['v_bpw']} "
-            f"| {bpw['avg_bpw']} "
-            f"| {_fmt(eff, 2) if eff else '-'} "
-            f"| {100*found/len(group):.1f}% "
-            f"| {len(group)} |"
+            f"| {st['bpw']['k_bpw']} "
+            f"| {st['bpw']['v_bpw']} "
+            f"| {st['bpw']['avg_bpw']} "
+            f"| {_fmt(st['eff'], 2) if st['eff'] else '-'} "
+            f"| {_fmt(st['avg_r'], 3) if st['avg_r'] else '-'} "
+            f"| {st['found_pct']:.1f}% "
+            f"| {st['n']} |"
         )
     lines.append("")
+    return lines
+
+
+def export_niah_tq_comparison() -> list[str]:
+    """TurboQuant pure / V3 flat / pure+PageMix NIAH 对照（同 18 条：2048/4096 × 3 pos × 3 seed）。"""
+    raw = load_jsonl(BASE / "server_main_exp/main_exp_results.jsonl")
+    order = [
+        "TurboQuant pure (tq_replace)",
+        "TurboQuant pure+PageMix",
+        "TurboQuant V3 flat (rw=128, K2/V2)",
+    ]
+    notes = {
+        "TurboQuant pure (tq_replace)": "BlockKV，sink=5，window=128，均匀 K2/V2，无 reorder",
+        "TurboQuant pure+PageMix": "同上 + PageMix + 第0层 K8/V8 保护（同主实验 PageMix）",
+        "TurboQuant V3 flat (rw=128, K2/V2)": "V3FlatCache，无 block/sink，residual_window=128，K2/V2",
+    }
+    lines = [
+        "## 2.1 TurboQuant 补充基线 NIAH 对比",
+        "",
+        "同一 NIAH 协议：`context_length` 2048/4096，`position` 0.1/0.5/0.9，`seed` 0/1/2，共 **18** 条/方法。",
+        "",
+        "| 方法 | Found | Found率 | ratio | eff bpw | 2048 | 4096 | 说明 |",
+        "|------|------:|--------:|------:|--------:|-----:|-----:|------|",
+    ]
+    for method in order:
+        group = [r for r in raw if r.get("method") == method]
+        if not group:
+            lines.append(f"| {method} | - | - | - | - | - | - | （无数据） |")
+            continue
+        st = _niah_stats(group)
+        by_ctx = defaultdict(lambda: [0, 0])
+        for r in group:
+            by_ctx[int(r["context_length"])][0] += int(r["found"])
+            by_ctx[int(r["context_length"])][1] += 1
+        c2048 = by_ctx.get(2048, [0, 0])
+        c4096 = by_ctx.get(4096, [0, 0])
+        lines.append(
+            f"| {method} "
+            f"| {st['found']}/{st['n']} "
+            f"| {st['found_pct']:.1f}% "
+            f"| {_fmt(st['avg_r'], 3) if st['avg_r'] else '-'} "
+            f"| {_fmt(st['eff'], 2) if st['eff'] else '-'} "
+            f"| {c2048[0]}/{c2048[1]} "
+            f"| {c4096[0]}/{c4096[1]} "
+            f"| {notes.get(method, '')} |"
+        )
+    lines.extend(
+        [
+            "",
+            "**解读（简要）**：",
+            "- **pure (tq_replace)**：块级均匀 2bit，NIAH 最好（约 72%），与此前论文对齐配置一致。",
+            "- **pure+PageMix（含第 0 层 K8/V8）**：PPL 最低；NIAH 约 77.8%，略高于无层保护的 pure（72.2%）；首层 8bit 使压缩比略低于无保护版。",
+            "- **V3 flat (rw=128)**：无 block，作者式 residual window；NIAH 约 22%，低于块级 pure。",
+            "",
+        ]
+    )
     return lines
 
 
@@ -252,11 +348,13 @@ def main() -> None:
         "# Llama-2-7B-Chat 实验结果汇总（含 K/V BPW）",
         "",
         "> K bpw / V bpw：每个压缩权重上 K、V 的平均比特宽度。",
-        "> eff bpw = 32/compression_ratio（相对 FP16 KV 对的整体有效比特）。",
+        "> ratio = avg_compression_ratio（KV 显存相对 FP16 的压缩倍数）。",
+        "> eff bpw = 32/ratio（相对 FP16 KV 对的整体有效比特）。",
         "",
     ]
     lines.extend(export_ppl())
     lines.extend(export_niah())
+    lines.extend(export_niah_tq_comparison())
     lines.extend(export_longbench())
     lines.extend(mixed_precision_doc())
 
@@ -271,7 +369,7 @@ def main() -> None:
         csv_path = BASE / "results_ppl_with_bpw.csv"
         fields = [
             "method", "backend", "ppl", "k_bpw", "v_bpw", "avg_bpw", "effective_bpw",
-            "compression_ratio", "mixed", "high_key_bits", "low_key_bits",
+            "ratio", "compression_ratio", "mixed", "high_key_bits", "low_key_bits",
             "high_value_bits", "low_value_bits", "important_ratio",
         ]
         with csv_path.open("w", newline="", encoding="utf-8") as f:
@@ -287,6 +385,7 @@ def main() -> None:
                     "v_bpw": row.get("v_bpw"),
                     "avg_bpw": row.get("avg_bpw"),
                     "effective_bpw": row.get("effective_bpw"),
+                    "ratio": row.get("avg_compression_ratio"),
                     "compression_ratio": row.get("avg_compression_ratio"),
                     "mixed": cfg.get("mixed") or cfg.get("mixed_precision"),
                     "high_key_bits": cfg.get("high_key_bits"),

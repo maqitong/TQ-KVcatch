@@ -21,7 +21,11 @@ def theoretical_bpw_from_config(
     config: dict[str, Any],
 ) -> tuple[float, float, float]:
     """Theoretical page bpw on compressed pages (from scheme config)."""
-    if backend in ("dynamic", "") or config.get("policy") == "fp16":
+    if backend in ("dynamic", "") or config.get("policy") in ("fp16", "v3_flat"):
+        if backend == "v3_flat" or config.get("policy") == "v3_flat":
+            k = _as_float(config.get("key_bits"), 2)
+            v = _as_float(config.get("value_bits"), 2)
+            return k, v, (k + v) / 2.0
         return FP16_BITS, FP16_BITS, FP16_BITS
 
     if config.get("mixed"):

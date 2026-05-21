@@ -101,6 +101,8 @@ def _selected_backends(name: str) -> list[str]:
             "block_skvq",
             "block_skvq_mix",
             "block_tq_pure",
+            "block_tq_pure_mix",
+            "v3_flat",
             "skvq_native",
         ]
     return _parse_csv(name) if "," in name else [name]
@@ -123,13 +125,28 @@ def _paper_tq_pure_policy():
 
 
 def _backend_config(args, backend: str) -> dict:
-    if backend == "block_tq_pure":
+    if backend == "v3_flat":
+        return {
+            "policy": "v3_flat",
+            "key_bits": args.key_bits,
+            "value_bits": args.value_bits,
+            "residual_window": int(getattr(args, "residual_window", 128)),
+            "mixed": False,
+            "paper_baseline": "v3_flat",
+            "integration": "turboquant/V3FlatCache+MSECompressor",
+        }
+    if backend in ("block_tq_pure", "block_tq_pure_mix"):
         from turboquant.block_cache.skvq_native_integration import (
             PAPER_CLIP,
             PAPER_SINK,
             PAPER_WINDOW,
         )
 
+        mixed = backend == "block_tq_pure_mix"
+        from turboquant.block_cache.skvq_native_integration import paper_pure_layer_protection
+
+        paper_tag = "tq_pure_mix" if mixed else "tq_pure"
+        prot_layers, prot_k, prot_v = paper_pure_layer_protection(paper_tag, args)
         return {
             "policy": "hybrid",
             "block_size": args.block_size,
@@ -137,10 +154,18 @@ def _backend_config(args, backend: str) -> dict:
             "window": PAPER_WINDOW,
             "key_bits": args.key_bits,
             "value_bits": args.value_bits,
-            "mixed": False,
-            "paper_baseline": "tq_pure",
+            "mixed": mixed,
+            "important_ratio": args.important_ratio if mixed else None,
+            "importance_metric": args.importance_metric if mixed else None,
+            "high_key_bits": args.high_key_bits if mixed else None,
+            "high_value_bits": args.high_value_bits if mixed else None,
+            "low_key_bits": args.low_key_bits if mixed else None,
+            "low_value_bits": args.low_value_bits if mixed else None,
+            "paper_baseline": paper_tag,
             "reorder": False,
-            "protected_layers": 0,
+            "protected_layers": prot_layers,
+            "protected_key_bits": prot_k if mixed else None,
+            "protected_value_bits": prot_v if mixed else None,
             "clipping": PAPER_CLIP,
             "integration": "turboquant-pytorch/BlockKVCache",
         }
@@ -177,15 +202,32 @@ def _backend_config(args, backend: str) -> dict:
     }
 
 
-def _cache_factory(args, backend: str) -> Callable[[], BlockKVCache | None]:
+def _cache_factory(args, backend: str) -> Callable:
     if backend in {"dynamic", "skvq_native"}:
         return lambda: None
+
+    if backend == "v3_flat":
+        from turboquant.block_cache.v3_flat_cache import V3FlatCache
+
+        def make_v3() -> V3FlatCache:
+            return V3FlatCache(
+                key_bits=int(args.key_bits),
+                value_bits=int(args.value_bits),
+                residual_window=int(getattr(args, "residual_window", 128)),
+                protected_layers=0,
+                n_layers=int(args.num_layers or 32),
+                seed=42,
+            )
+
+        return make_v3
+
     if backend not in {
         "block_tq",
         "block_tq_mix",
         "block_skvq",
         "block_skvq_mix",
         "block_tq_pure",
+        "block_tq_pure_mix",
     }:
         raise ValueError(f"unknown backend: {backend}")
 
@@ -193,17 +235,23 @@ def _cache_factory(args, backend: str) -> Callable[[], BlockKVCache | None]:
     mixed = backend.endswith("_mix")
 
     def make_cache() -> BlockKVCache:
-        if backend == "block_tq_pure":
-            from turboquant.block_cache.skvq_native_integration import PAPER_CLIP
+        if backend in ("block_tq_pure", "block_tq_pure_mix"):
+            from turboquant.block_cache.skvq_native_integration import (
+                PAPER_CLIP,
+                paper_pure_layer_protection,
+            )
 
             policy = _paper_tq_pure_policy()
             reorder_file = None
-            protected_layers = 0
+            paper_tag = "tq_pure_mix" if backend == "block_tq_pure_mix" else "tq_pure"
+            protected_layers, prot_k, prot_v = paper_pure_layer_protection(paper_tag, args)
             clipping = PAPER_CLIP
         else:
             policy = _build_policy(args)
             reorder_file = args.reorder_file
             protected_layers = args.protected_layers
+            prot_k = args.protected_key_bits
+            prot_v = args.protected_value_bits
             clipping = args.clipping
 
         cfg = BlockCacheConfig(
@@ -222,8 +270,8 @@ def _cache_factory(args, backend: str) -> Callable[[], BlockKVCache | None]:
             low_value_bits=args.low_value_bits,
             num_layers=args.num_layers,
             protected_layers=protected_layers,
-            protected_key_bits=args.protected_key_bits,
-            protected_value_bits=args.protected_value_bits,
+            protected_key_bits=prot_k,
+            protected_value_bits=prot_v,
             group_size=args.group_size,
             key_group_size=args.key_group_size,
             value_group_size=args.value_group_size,
@@ -683,6 +731,12 @@ def main() -> None:
     parser.add_argument("--protected-layers", type=int, default=0)
     parser.add_argument("--protected-key-bits", type=_parse_bits, default=8)
     parser.add_argument("--protected-value-bits", type=_parse_bits, default=8)
+    parser.add_argument(
+        "--residual-window",
+        type=int,
+        default=128,
+        help="V3FlatCache FP16 tail length (author default 128; 0 = compress full history)",
+    )
     args = parser.parse_args()
 
     if args.output_dir is None:

@@ -166,6 +166,17 @@ def build_methods(args) -> list[MethodSpec]:
             paper_baseline="skvq_native",
         ),
         MethodSpec(
+            name="TurboQuant V3 flat (rw=128, K2/V2)",
+            backend="v3_flat",
+            quant_backend=None,
+            policy="none",
+            method_group="paper_baseline",
+            page_quant_scheme=f"V3 flat K{args.key_bits}/V{args.value_bits}",
+            key_bits=args.key_bits,
+            value_bits=args.value_bits,
+            paper_baseline="v3_flat",
+        ),
+        MethodSpec(
             name="TurboQuant pure (tq_replace)",
             backend="block_tq",
             quant_backend="turboquant",
@@ -175,6 +186,23 @@ def build_methods(args) -> list[MethodSpec]:
             key_bits=args.key_bits,
             value_bits=args.value_bits,
             paper_baseline="tq_pure",
+        ),
+        MethodSpec(
+            name="TurboQuant pure+PageMix",
+            backend="block_tq_pure_mix",
+            quant_backend="turboquant",
+            policy="hybrid",
+            method_group="paper_baseline",
+            page_quant_scheme=mix_scheme,
+            mixed_precision=True,
+            importance_metric=args.importance_metric,
+            key_bits=args.key_bits,
+            value_bits=args.value_bits,
+            high_key_bits=args.high_key_bits,
+            high_value_bits=args.high_value_bits,
+            low_key_bits=args.low_key_bits,
+            low_value_bits=args.low_value_bits,
+            paper_baseline="tq_pure_mix",
         ),
         MethodSpec(
             name="Hybrid+SKVQ+Block",
@@ -241,19 +269,44 @@ def _paper_tq_pure_policy():
     return HybridPolicy(sink_size=PAPER_SINK, window_size=PAPER_WINDOW)
 
 
-def _cache_factory(args, method: MethodSpec) -> Callable[[], BlockKVCache | None]:
-    if method.quant_backend is None or method.backend == "skvq_native":
+def _cache_factory(args, method: MethodSpec) -> Callable:
+    if method.backend == "skvq_native":
+        return lambda: None
+
+    if method.backend == "v3_flat":
+        from turboquant.block_cache.v3_flat_cache import V3FlatCache
+
+        def make_v3() -> V3FlatCache:
+            return V3FlatCache(
+                key_bits=int(method.key_bits),
+                value_bits=int(method.value_bits),
+                residual_window=int(args.residual_window),
+                protected_layers=0,
+                n_layers=int(args.num_layers or 32),
+                seed=42,
+            )
+
+        return make_v3
+
+    if method.quant_backend is None:
         return lambda: None
 
     def make_cache() -> BlockKVCache:
-        if method.paper_baseline == "tq_pure":
-            from turboquant.block_cache.skvq_native_integration import PAPER_CLIP
+        if method.paper_baseline in ("tq_pure", "tq_pure_mix"):
+            from turboquant.block_cache.skvq_native_integration import (
+                PAPER_CLIP,
+                paper_pure_layer_protection,
+            )
 
             policy = _paper_tq_pure_policy()
             reorder_file = None
-            protected_layers = 0
+            protected_layers, prot_k, prot_v = paper_pure_layer_protection(
+                method.paper_baseline, args
+            )
             clipping = PAPER_CLIP
         else:
+            prot_k = args.protected_key_bits
+            prot_v = args.protected_value_bits
             policy = _policy_from_name(method.policy, args)
             reorder_file = args.reorder_file
             protected_layers = args.protected_layers
@@ -275,8 +328,8 @@ def _cache_factory(args, method: MethodSpec) -> Callable[[], BlockKVCache | None
             low_value_bits=method.low_value_bits,
             num_layers=args.num_layers,
             protected_layers=protected_layers,
-            protected_key_bits=args.protected_key_bits,
-            protected_value_bits=args.protected_value_bits,
+            protected_key_bits=prot_k,
+            protected_value_bits=prot_v,
             group_size=args.group_size,
             key_group_size=args.key_group_size,
             value_group_size=args.value_group_size,
@@ -290,13 +343,29 @@ def _cache_factory(args, method: MethodSpec) -> Callable[[], BlockKVCache | None
 
 
 def _method_config(args, method: MethodSpec) -> dict:
-    if method.paper_baseline == "tq_pure":
+    if method.paper_baseline == "v3_flat":
+        return {
+            "method_group": method.method_group,
+            "policy": "v3_flat",
+            "page_quant_scheme": method.page_quant_scheme,
+            "key_bits": method.key_bits,
+            "value_bits": method.value_bits,
+            "residual_window": int(args.residual_window),
+            "mixed_precision": False,
+            "paper_baseline": "v3_flat",
+            "integration": "turboquant/V3FlatCache+MSECompressor",
+        }
+    if method.paper_baseline in ("tq_pure", "tq_pure_mix"):
         from turboquant.block_cache.skvq_native_integration import (
             PAPER_CLIP,
             PAPER_SINK,
             PAPER_WINDOW,
+            paper_pure_layer_protection,
         )
 
+        prot_layers, prot_k, prot_v = paper_pure_layer_protection(
+            method.paper_baseline, args
+        )
         return {
             "block_size": args.block_size,
             "method_group": method.method_group,
@@ -307,10 +376,18 @@ def _method_config(args, method: MethodSpec) -> dict:
             "window": PAPER_WINDOW,
             "key_bits": method.key_bits,
             "value_bits": method.value_bits,
-            "mixed_precision": False,
-            "paper_baseline": "tq_pure",
+            "mixed_precision": method.mixed_precision,
+            "important_ratio": args.important_ratio if method.mixed_precision else None,
+            "importance_metric": method.importance_metric if method.mixed_precision else None,
+            "high_key_bits": method.high_key_bits if method.mixed_precision else None,
+            "high_value_bits": method.high_value_bits if method.mixed_precision else None,
+            "low_key_bits": method.low_key_bits if method.mixed_precision else None,
+            "low_value_bits": method.low_value_bits if method.mixed_precision else None,
+            "paper_baseline": method.paper_baseline,
             "reorder": False,
-            "protected_layers": 0,
+            "protected_layers": prot_layers,
+            "protected_key_bits": prot_k if method.paper_baseline == "tq_pure_mix" else None,
+            "protected_value_bits": prot_v if method.paper_baseline == "tq_pure_mix" else None,
             "clipping": PAPER_CLIP,
             "integration": "turboquant-pytorch/BlockKVCache",
         }
@@ -737,7 +814,23 @@ def main() -> None:
     parser.add_argument(
         "--only-paper-baselines",
         action="store_true",
-        help="Run only SKVQ skvq_baseline (native) and TurboQuant pure (tq_replace)",
+        help="Run paper baselines: SKVQ native, TQ pure, TQ pure+PageMix, V3 flat",
+    )
+    parser.add_argument(
+        "--only-v3-baselines",
+        action="store_true",
+        help="Run only TurboQuant V3 flat (no block) and TurboQuant pure+PageMix",
+    )
+    parser.add_argument(
+        "--filter-paper-baseline",
+        default=None,
+        help="Run only methods with this paper_baseline tag (e.g. tq_pure_mix)",
+    )
+    parser.add_argument(
+        "--residual-window",
+        type=int,
+        default=128,
+        help="V3FlatCache: recent tokens kept in FP16 (author default 128; 0 = no tail)",
     )
     parser.add_argument("--skvq-root", default=None, help="Path to SKVQ repo for native baseline")
     parser.add_argument(
@@ -787,6 +880,14 @@ def main() -> None:
     methods = build_methods(args)
     if args.only_paper_baselines:
         methods = [m for m in methods if m.paper_baseline is not None]
+    if args.only_v3_baselines:
+        methods = [
+            m
+            for m in methods
+            if m.paper_baseline in ("v3_flat", "tq_pure_mix")
+        ]
+    if args.filter_paper_baseline:
+        methods = [m for m in methods if m.paper_baseline == args.filter_paper_baseline]
 
     block_methods = [m for m in methods if m.backend != "skvq_native"]
     native_methods = [m for m in methods if m.backend == "skvq_native"]

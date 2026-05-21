@@ -79,6 +79,12 @@ def _model_input_device(model) -> torch.device:
         return torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
+def _paper_tq_pure_policy():
+    from turboquant.block_cache.skvq_native_integration import PAPER_SINK, PAPER_WINDOW
+
+    return HybridPolicy(sink_size=PAPER_SINK, window_size=PAPER_WINDOW)
+
+
 def _build_policy(args):
     if args.policy == "token":
         return TokenBlockPolicy()
@@ -116,19 +122,45 @@ def _cache_factory(args, backend: str) -> Callable[[], BlockKVCache | V2PaperCac
 
         return make_v3
 
-    if backend not in {"block_tq", "block_tq_mix", "block_skvq", "block_skvq_mix"}:
+    if backend not in {
+        "block_tq",
+        "block_tq_mix",
+        "block_skvq",
+        "block_skvq_mix",
+        "block_tq_pure",
+        "block_tq_pure_mix",
+    }:
         raise ValueError(f"unknown backend: {backend}")
 
     quant_backend = "skvq" if "skvq" in backend else "turboquant"
     mixed = backend.endswith("_mix")
 
     def make_cache() -> BlockKVCache:
+        if backend in ("block_tq_pure", "block_tq_pure_mix"):
+            from turboquant.block_cache.skvq_native_integration import (
+                PAPER_CLIP,
+                paper_pure_layer_protection,
+            )
+
+            policy = _paper_tq_pure_policy()
+            reorder_file = None
+            paper_tag = "tq_pure_mix" if backend == "block_tq_pure_mix" else "tq_pure"
+            protected_layers, prot_k, prot_v = paper_pure_layer_protection(paper_tag, args)
+            clipping = PAPER_CLIP
+        else:
+            policy = _build_policy(args)
+            reorder_file = args.reorder_file
+            protected_layers = args.protected_layers
+            prot_k = args.protected_key_bits
+            prot_v = args.protected_value_bits
+            clipping = args.clipping
+
         cfg = BlockCacheConfig(
             block_size=args.block_size,
             key_bits=args.key_bits,
             value_bits=args.value_bits,
             granularity=args.granularity,
-            policy=_build_policy(args),
+            policy=policy,
             quant_backend=quant_backend,
             mixed_precision=mixed,
             importance_metric=args.importance_metric,
@@ -138,14 +170,14 @@ def _cache_factory(args, backend: str) -> Callable[[], BlockKVCache | V2PaperCac
             low_key_bits=args.low_key_bits,
             low_value_bits=args.low_value_bits,
             num_layers=args.num_layers,
-            protected_layers=args.protected_layers,
-            protected_key_bits=args.protected_key_bits,
-            protected_value_bits=args.protected_value_bits,
+            protected_layers=protected_layers,
+            protected_key_bits=prot_k,
+            protected_value_bits=prot_v,
             group_size=args.group_size,
             key_group_size=args.key_group_size,
             value_group_size=args.value_group_size,
-            clipping=args.clipping,
-            reorder_file=args.reorder_file,
+            clipping=clipping,
+            reorder_file=reorder_file,
             max_cached_decompressed_blocks=args.max_cached_decompressed_blocks,
         )
         return BlockKVCache(cfg)
@@ -155,7 +187,18 @@ def _cache_factory(args, backend: str) -> Callable[[], BlockKVCache | V2PaperCac
 
 def _selected_backends(name: str) -> list[str]:
     if name == "all":
-        return ["dynamic", "block_tq", "block_tq_mix", "block_skvq", "block_skvq_mix"]
+        return [
+            "dynamic",
+            "block_tq",
+            "block_tq_mix",
+            "block_skvq",
+            "block_skvq_mix",
+            "block_tq_pure",
+            "block_tq_pure_mix",
+            "v3_flat",
+        ]
+    if "," in name:
+        return [b.strip() for b in name.split(",") if b.strip()]
     return [name]
 
 
@@ -266,6 +309,14 @@ def evaluate_backend(model, input_ids: torch.Tensor, args, backend: str) -> PPLR
         for key, count in (report.get("bit_histogram") or {}).items():
             bit_histogram[key] = bit_histogram.get(key, 0) + int(count)
 
+    paper_sink = args.sink
+    paper_window = args.window
+    if backend in ("block_tq_pure", "block_tq_pure_mix"):
+        from turboquant.block_cache.skvq_native_integration import PAPER_SINK, PAPER_WINDOW
+
+        paper_sink = PAPER_SINK
+        paper_window = PAPER_WINDOW
+
     result = PPLResult(
         backend=backend,
         model=args.model,
@@ -286,11 +337,16 @@ def evaluate_backend(model, input_ids: torch.Tensor, args, backend: str) -> PPLR
                 else ("v3_flat" if backend == "v3_flat" else args.policy)
             ),
             "block_size": args.block_size,
-            "sink": args.sink,
-            "window": args.window,
+            "sink": paper_sink,
+            "window": paper_window,
             "key_bits": args.key_bits,
             "value_bits": args.value_bits,
             "mixed": backend.endswith("_mix"),
+            "paper_baseline": (
+                "tq_pure_mix"
+                if backend == "block_tq_pure_mix"
+                else ("tq_pure" if backend == "block_tq_pure" else None)
+            ),
             "importance_metric": args.importance_metric,
             "important_ratio": args.important_ratio,
             "high_key_bits": args.high_key_bits,
@@ -343,6 +399,8 @@ def main() -> None:
             "block_tq_mix",
             "block_skvq",
             "block_skvq_mix",
+            "block_tq_pure",
+            "block_tq_pure_mix",
             "v2_paper",
             "v3_flat",
             "all",
@@ -372,8 +430,8 @@ def main() -> None:
     parser.add_argument(
         "--residual-window",
         type=int,
-        default=0,
-        help="TurboQuant V3 flat cache only: 0 = paper-style full-sequence quant, no fp16 tail",
+        default=128,
+        help="TurboQuant V3 flat only: recent FP16 tail length (author default 128)",
     )
     parser.add_argument("--block-size", type=int, default=16)
     parser.add_argument("--sink", type=int, default=16)

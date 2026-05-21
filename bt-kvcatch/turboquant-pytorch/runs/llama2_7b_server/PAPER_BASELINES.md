@@ -5,7 +5,9 @@
 | 显示名 | NIAH backend | LongBench backend | 对齐配置 |
 |--------|--------------|-------------------|----------|
 | SKVQ skvq_baseline (native) | `skvq_native` | `skvq_native` | SKVQ `ModelKVCacheManager`，window=128，sink=5，reorder，clip=0.96 |
+| TurboQuant V3 flat (rw=128, K2/V2) | `v3_flat` | `v3_flat` | 作者 V3 flat；`residual_window=128`，无 block/sink |
 | TurboQuant pure (tq_replace) | `block_tq` + `paper_baseline=tq_pure` | `block_tq_pure` | Hybrid sink=5，window=128，无 reorder，protect=0，clip=0.96 |
+| TurboQuant pure+PageMix | `block_tq_pure_mix` | `block_tq_pure_mix` | 同上 + PageMix 30% K4/V4 + **第 0 层 K8/V8**（`protected_layers=1`，同主实验） |
 
 `experiment_main` / `eval_longbench --backend all` 已包含上述两项。
 

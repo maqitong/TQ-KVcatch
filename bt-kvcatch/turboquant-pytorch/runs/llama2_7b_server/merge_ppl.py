@@ -18,8 +18,9 @@ METHOD_ORDER = [
     "FP16",
     "SKVQ skvq_baseline (native)",
     "TurboQuant V2 paper (QJL)",
-    "TurboQuant V3 flat (rw=0)",
+    "TurboQuant V3 flat (rw=128, K2/V2)",
     "TurboQuant pure (tq_replace)",
+    "TurboQuant pure+PageMix",
     "TurboQuant TokenBlock",
     "SKVQ TokenBlock",
     "Hybrid+TQ+Block",
@@ -51,8 +52,18 @@ def infer_method(row: dict) -> str:
     if backend == "v2_paper":
         return "TurboQuant V2 paper (QJL)"
     if backend == "v3_flat":
-        rw = row.get("config", {}).get("residual_window", 0)
-        return f"TurboQuant V3 flat (rw={rw})"
+        rw = row.get("config", {}).get("residual_window", 128)
+        kb = row.get("config", {}).get("key_bits", 2)
+        vb = row.get("config", {}).get("value_bits", 2)
+        return f"TurboQuant V3 flat (rw={rw}, K{kb}/V{vb})"
+    if backend == "block_tq_pure_mix":
+        return "TurboQuant pure+PageMix"
+    if backend == "block_tq_pure":
+        return "TurboQuant pure (tq_replace)"
+    if row.get("config", {}).get("paper_baseline") == "tq_pure_mix":
+        return "TurboQuant pure+PageMix"
+    if row.get("config", {}).get("paper_baseline") == "tq_pure":
+        return "TurboQuant pure (tq_replace)"
     if backend == "skvq_native":
         return "SKVQ skvq_baseline (native)"
     if row.get("method") in LEGACY_METHOD_RENAME:
@@ -99,7 +110,7 @@ def policy_label(row: dict) -> str:
     if p == "v2_paper" or row.get("backend") == "v2_paper":
         return "v2_paper,no_residual_window"
     if p == "v3_flat" or row.get("backend") == "v3_flat":
-        return f"v3_flat,rw={cfg.get('residual_window', 0)}"
+        return f"v3_flat,rw={cfg.get('residual_window', 128)}"
     if p == "sliding_window":
         return f"window={cfg.get('window')},sink={cfg.get('sink')}"
     if p:
@@ -123,6 +134,8 @@ def main() -> None:
         base / "paper_baselines_ppl.jsonl",
         base / "baseline_ppl_temp.jsonl",
         base / "v3_flat_ppl.jsonl",
+        base / "v3_flat_rw128_k2v2.jsonl",
+        base / "tq_pure_pagemix_rw128_sink5.jsonl",
         base / "v2_paper_ppl.jsonl",
     ]
     out_jsonl = base / "ppl.jsonl"
@@ -145,8 +158,23 @@ def main() -> None:
             return (len(METHOD_ORDER), method)
 
     merged = sorted(by_key.values(), key=sort_key)
+    # One row per display method; prefer higher protected_layers (layer-prot reruns).
+    by_method: dict[str, dict] = {}
+    for row in merged:
+        method = row["method"]
+        prev = by_method.get(method)
+        if prev is None:
+            by_method[method] = row
+            continue
+        pl_new = int((row.get("config") or {}).get("protected_layers") or 0)
+        pl_old = int((prev.get("config") or {}).get("protected_layers") or 0)
+        if pl_new >= pl_old:
+            by_method[method] = row
+    merged = sorted(by_method.values(), key=sort_key)
     for row in merged:
         attach_bpw_fields(row)
+        ratio = row.get("avg_compression_ratio")
+        row["ratio"] = ratio
 
     with out_jsonl.open("w", encoding="utf-8") as f:
         for row in merged:
@@ -161,6 +189,7 @@ def main() -> None:
         "v_bpw",
         "avg_bpw",
         "effective_bpw",
+        "ratio",
         "compression_ratio",
         "loss",
         "tokens",
@@ -187,6 +216,7 @@ def main() -> None:
                     "v_bpw": _fmt_num(row.get("v_bpw")),
                     "avg_bpw": _fmt_num(row.get("avg_bpw")),
                     "effective_bpw": _fmt_num(row.get("effective_bpw")),
+                    "ratio": _fmt_num(row.get("ratio"), 3),
                     "compression_ratio": _fmt_num(row.get("avg_compression_ratio"), 3),
                     "loss": _fmt_num(row.get("loss")),
                     "tokens": row.get("tokens", ""),

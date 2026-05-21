@@ -1,7 +1,8 @@
 """TurboQuant V3 flat KV cache (MSE / Lloyd-Max), optional residual window.
 
-Used for paper-style PPL: ``residual_window=0`` compresses the full history with
-no fp16 tail (no residual-window trick).
+Aligns with author ``generation_test.V3Cache``: no block/sink; ``residual_window``
+keeps the most recent tokens in FP16 (default 128). ``residual_window=0`` compresses
+the full history (ablation only — poor generation in author README).
 """
 from __future__ import annotations
 
@@ -20,7 +21,7 @@ class V3FlatCache(DynamicCache):
         self,
         key_bits: int = 2,
         value_bits: int = 2,
-        residual_window: int = 0,
+        residual_window: int = 128,
         protected_layers: int = 0,
         n_layers: int = 32,
         seed: int = 42,
