@@ -1,0 +1,6 @@
+method,lcc,repobench-p,passage_retrieval_en,trec,2wikimqa,gov_report,multifieldqa_zh,avg
+fp16,,,,,,,,
+KIVI,,,,,,,,
+tq_replace,,,,,,,,
+tq_hybrid,,,,,,,,
+skvq_baseline,,,,,,,,

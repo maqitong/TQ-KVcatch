@@ -1,0 +1,2 @@
+task,method,kbits,vbits,status,score,n_samples,oom,elapsed_sec,peak_allocated_gb,group_size,window_size,sink,clip,protect_layers,protected_bits,error
+trec,fp16,2,2,ok,38.89,3,0,10.09,8.683,128,128,5,0.96,,,

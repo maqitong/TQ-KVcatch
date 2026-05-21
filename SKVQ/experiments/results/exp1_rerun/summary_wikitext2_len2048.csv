@@ -1,0 +1,7 @@
+method,k2-v2_ppl,k2-v1.5_ppl,k1.5-v1.5_ppl,k2-v2_status,k2-v1.5_status,k1.5-v1.5_status
+fp16,6.872136,6.872136,6.872136,ok,ok,ok
+KIVI,8.808283,12.387804,21.758198,ok,ok,ok
+skvq_baseline,7.608276,8.963426,13.096522,ok,ok,ok
+tq_replace,8.163056,8.743773,11.429075,ok,ok,ok
+tq_hybrid,7.937551,8.552000,18.480734,ok,ok,ok
+tq_asym_protect,7.295391,7.506462,8.337813,ok,ok,ok

@@ -1,0 +1,16 @@
+dataset,seq_len,method,kbits,vbits,status,ppl,elapsed_sec,peak_allocated_gb,n_eval,calib_dataset,calib_samples,group_size,window_size,sink,clip,protect_layers,protected_bits,error
+wikitext2,2048,fp16,1.5,1.5,ok,6.839045,0.00,7.595,48,wikitext2,256,128,128,5,0.96,,,
+wikitext2,2048,fp16,2,1.5,ok,6.839045,0.00,7.595,48,wikitext2,256,128,128,5,0.96,,,
+wikitext2,2048,fp16,2,2,ok,6.839045,10.29,7.595,48,wikitext2,256,128,128,5,0.96,,,
+wikitext2,2048,skvq_page_fixed,1.5,1.5,ok,52.684151,3465.17,6.694,48,wikitext2,256,128,128,5,0.96,,,
+wikitext2,2048,skvq_page_fixed,2,1.5,ok,14.569267,3494.46,6.694,48,wikitext2,256,128,128,5,0.96,,,
+wikitext2,2048,skvq_page_fixed,2,2,ok,10.444647,3489.46,6.694,48,wikitext2,256,128,128,5,0.96,,,
+wikitext2,2048,skvq_page_mixed,1.5,1.5,ok,39.645302,3488.28,6.700,48,wikitext2,256,128,128,5,0.96,,,
+wikitext2,2048,skvq_page_mixed,2,1.5,ok,12.341153,3492.71,6.700,48,wikitext2,256,128,128,5,0.96,,,
+wikitext2,2048,skvq_page_mixed,2,2,ok,9.521575,3485.55,6.700,48,wikitext2,256,128,128,5,0.96,,,
+wikitext2,2048,tq_block,1.5,1.5,unsupported,,,,48,wikitext2,256,128,128,5,0.96,,,TurboQuant block backend does not support 1.5-bit
+wikitext2,2048,tq_block,2,1.5,unsupported,,,,48,wikitext2,256,128,128,5,0.96,,,TurboQuant block backend does not support 1.5-bit
+wikitext2,2048,tq_block,2,2,ok,8.191095,157.79,6.691,48,wikitext2,256,128,128,5,0.96,,,
+wikitext2,2048,tq_block_mixed,1.5,1.5,unsupported,,,,48,wikitext2,256,128,128,5,0.96,,,TurboQuant block backend does not support 1.5-bit
+wikitext2,2048,tq_block_mixed,2,1.5,unsupported,,,,48,wikitext2,256,128,128,5,0.96,,,TurboQuant block backend does not support 1.5-bit
+wikitext2,2048,tq_block_mixed,2,2,ok,7.924881,1398.80,6.699,48,wikitext2,256,128,128,5,0.96,,,

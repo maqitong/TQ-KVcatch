@@ -1,0 +1,6 @@
+method,k2-v2_ppl,k2-v1.5_ppl,k1.5-v1.5_ppl,k2-v2_status,k2-v1.5_status,k1.5-v1.5_status
+fp16,6.724115,6.724115,6.724115,ok,ok,ok
+KIVI,,,,error,error,error
+skvq_baseline,,,,error,error,error
+tq_replace,,,,error,error,error
+tq_hybrid,,,,error,error,error

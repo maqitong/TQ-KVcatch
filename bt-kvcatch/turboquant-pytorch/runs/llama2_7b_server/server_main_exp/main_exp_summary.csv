@@ -1,0 +1,245 @@
+method,method_group,quant_backend,policy,page_quant_scheme,context_length,position,seed,found,compression_ratio,seconds,input_tokens,response
+FP16,reference,,none,FP16,2048,0.1,0,1,,0.8830,1972,AURORA-7749.
+SKVQ Baseline,baseline,skvq,token,Uniform K2/V2,2048,0.1,0,0,5.7764960346070655,104.9301,1972,A749-748-749-7-7-7-7-7-7-7-77777
+TurboQuant Baseline,baseline,turboquant,token,Uniform K2/V2,2048,0.1,0,0,6.348242811501597,13.3959,1972,The secret project code name is AURORA-774.
+Hybrid+SKVQ+Block,method,skvq,hybrid,Uniform K2/V2,2048,0.1,0,0,4.210414452709883,95.5623,1972,AURORA-749.
+Hybrid+TQ+Block,method,turboquant,hybrid,Uniform K2/V2,2048,0.1,0,0,4.497727272727273,13.3974,1972,Aurora-749.
+Hybrid+TQ+Block+PageMix,method,turboquant,hybrid,"Mixed high K4/V4, low K2/V2",2048,0.1,0,0,3.9024870721497167,22.2369,1972,AURORA-749.
+Hybrid+TQ+RandomMix,ablation,turboquant,hybrid,"Mixed high K4/V4, low K2/V2",2048,0.1,0,1,3.8967805357581717,22.5265,1972,AURORA-7749.
+FP16,reference,,none,FP16,2048,0.1,1,1,,0.4210,2018,AURORA-7786.
+SKVQ Baseline,baseline,skvq,token,Uniform K2/V2,2048,0.1,1,0,5.804532577903683,106.9925,2018,"The committee reviewed routine budget notes and onboarding checklists, and regional maintenance plans.
+
+Several teams discussed documentation updates, onboard"
+TurboQuant Baseline,baseline,turboquant,token,Uniform K2/V2,2048,0.1,1,0,6.233846153846154,13.3398,2018,Aurora-7780.
+Hybrid+SKVQ+Block,method,skvq,hybrid,Uniform K2/V2,2048,0.1,1,0,4.338803599788248,100.8270,2018,"AURORA7789
+
+Several teams discussed documentation updates, onboarding checklists, and archive cleanup. The report included"
+Hybrid+TQ+Block,method,turboquant,hybrid,Uniform K2/V2,2048,0.1,1,0,4.5296089385474865,12.6077,2018,AURORA-786.
+Hybrid+TQ+Block+PageMix,method,turboquant,hybrid,"Mixed high K4/V4, low K2/V2",2048,0.1,1,0,3.9359223300970876,21.7714,2018,AURORA-786.
+Hybrid+TQ+RandomMix,ablation,turboquant,hybrid,"Mixed high K4/V4, low K2/V2",2048,0.1,1,0,3.9416342412451364,22.1655,2018,Aurora-7787.
+FP16,reference,,none,FP16,2048,0.1,2,1,,0.4188,1972,AURORA-7823.
+SKVQ Baseline,baseline,skvq,token,Uniform K2/V2,2048,0.1,2,0,5.7764960346070655,105.9800,1972,"The committee reviewed routine budget notes and office maintenance plans. Several teams discussed documentation updates, onboarding checklists, and cleanup.
+The report included"
+TurboQuant Baseline,baseline,turboquant,token,Uniform K2/V2,2048,0.1,2,0,6.180967238689548,12.9468,1972,AURORA7823.
+Hybrid+SKVQ+Block,method,skvq,hybrid,Uniform K2/V2,2048,0.1,2,0,4.298283261802575,99.1514,1972,"AURORA7823
+
+The report included ordinary project milestones, scheduling details, and meeting summaries. Regional coordinators shared"
+Hybrid+TQ+Block,method,turboquant,hybrid,Uniform K2/V2,2048,0.1,2,1,4.474040632054176,13.0826,1972,AURORA-7823.
+Hybrid+TQ+Block+PageMix,method,turboquant,hybrid,"Mixed high K4/V4, low K2/V2",2048,0.1,2,1,3.8967805357581717,21.6960,1972,AURORA-7823.
+Hybrid+TQ+RandomMix,ablation,turboquant,hybrid,"Mixed high K4/V4, low K2/V2",2048,0.1,2,1,3.8967805357581717,21.7684,1972,AURORA-7823.
+FP16,reference,,none,FP16,2048,0.5,0,1,,0.4227,1972,AURORA-7749.
+SKVQ Baseline,baseline,skvq,token,Uniform K2/V2,2048,0.5,0,0,5.7764960346070655,107.3996,1972,"The committee reviewed routine budget notes and office maintenance plans. Several teams discussed documentation updates, onboarding checklists, and meeting summaries. The report included"
+TurboQuant Baseline,baseline,turboquant,token,Uniform K2/V2,2048,0.5,0,0,6.180967238689548,12.7198,1972,AURORA-774.
+Hybrid+SKVQ+Block,method,skvq,hybrid,Uniform K2/V2,2048,0.5,0,1,4.2036055143160125,96.2923,1972,AURORA-7749.
+Hybrid+TQ+Block,method,turboquant,hybrid,Uniform K2/V2,2048,0.5,0,0,4.489795918367347,12.6637,1972,AURORA-774
+Hybrid+TQ+Block+PageMix,method,turboquant,hybrid,"Mixed high K4/V4, low K2/V2",2048,0.5,0,0,3.908216136195411,21.4215,1972,AURORA-77.
+Hybrid+TQ+RandomMix,ablation,turboquant,hybrid,"Mixed high K4/V4, low K2/V2",2048,0.5,0,1,3.8967805357581717,21.5401,1972,AURORA-7749.
+FP16,reference,,none,FP16,2048,0.5,1,1,,0.4126,2018,AURORA-7786.
+SKVQ Baseline,baseline,skvq,token,Uniform K2/V2,2048,0.5,1,0,5.804532577903683,108.3490,2018,"The report included ordinary project milestones, scheduling details, and meeting summaries.
+Question: What is the secret project?
+Documentation team:"
+TurboQuant Baseline,baseline,turboquant,token,Uniform K2/V2,2048,0.5,1,1,6.366197183098592,13.3610,2018,The secret project code name is AURORA-7786.
+Hybrid+SKVQ+Block,method,skvq,hybrid,Uniform K2/V2,2048,0.5,1,1,4.338803599788248,101.1684,2018,"The secret project code name is AURORA-7786.
+
+Background: Several teams discussed routine budget notes, onboarding checklists"
+Hybrid+TQ+Block,method,turboquant,hybrid,Uniform K2/V2,2048,0.5,1,0,4.5296089385474865,12.6783,2018,AURORA-776.
+Hybrid+TQ+Block+PageMix,method,turboquant,hybrid,"Mixed high K4/V4, low K2/V2",2048,0.5,1,0,3.9416342412451364,21.6567,2018,AURORA-78.
+Hybrid+TQ+RandomMix,ablation,turboquant,hybrid,"Mixed high K4/V4, low K2/V2",2048,0.5,1,1,3.9302325581395348,21.3694,2018,AURORA-7786.
+FP16,reference,,none,FP16,2048,0.5,2,1,,0.4096,1972,AURORA-7823.
+SKVQ Baseline,baseline,skvq,token,Uniform K2/V2,2048,0.5,2,0,5.7764960346070655,106.4725,1972,The secret project code name was A778237777777777777777777
+TurboQuant Baseline,baseline,turboquant,token,Uniform K2/V2,2048,0.5,2,1,6.3486529318541995,14.2196,1972,"The secret project code name is AURORA-7823.
+
+Question: What is the secret project code name?
+Answer: The"
+Hybrid+SKVQ+Block,method,skvq,hybrid,Uniform K2/V2,2048,0.5,2,1,4.298283261802575,98.9710,1972,"The secret project code name is AURORA-7823.
+
+The report included ordinary project milestones, scheduling details, and"
+Hybrid+TQ+Block,method,turboquant,hybrid,Uniform K2/V2,2048,0.5,2,1,4.474040632054176,13.2165,1972,AURORA-7823.
+Hybrid+TQ+Block+PageMix,method,turboquant,hybrid,"Mixed high K4/V4, low K2/V2",2048,0.5,2,0,3.9024870721497167,21.4024,1972,AURORA-782.
+Hybrid+TQ+RandomMix,ablation,turboquant,hybrid,"Mixed high K4/V4, low K2/V2",2048,0.5,2,0,3.9024870721497167,21.6567,1972,AURORA-782.
+FP16,reference,,none,FP16,2048,0.9,0,1,,0.4147,1972,AURORA-7749.
+SKVQ Baseline,baseline,skvq,token,Uniform K2/V2,2048,0.9,0,0,5.7764960346070655,106.8270,1972,"The committee reviewed routine budget notes and office maintenance plans. Several teams discussed documentation updates, onboarding checklists, and onboard cleanup."
+TurboQuant Baseline,baseline,turboquant,token,Uniform K2/V2,2048,0.9,0,1,6.3312101910828025,13.1852,1972,The secret project code name is AURORA-7749.
+Hybrid+SKVQ+Block,method,skvq,hybrid,Uniform K2/V2,2048,0.9,0,0,4.298283261802575,98.2058,1972,"The committee reviewed routine budget notes and office maintenance plans. Several teams discussed documentation updates, onboarding checklists, and archive cleanup. The report included"
+Hybrid+TQ+Block,method,turboquant,hybrid,Uniform K2/V2,2048,0.9,0,0,4.481900452488688,13.0190,1972,AURORA-749.
+Hybrid+TQ+Block+PageMix,method,turboquant,hybrid,"Mixed high K4/V4, low K2/V2",2048,0.9,0,0,3.9024870721497167,21.6812,1972,AURORA-774.
+Hybrid+TQ+RandomMix,ablation,turboquant,hybrid,"Mixed high K4/V4, low K2/V2",2048,0.9,0,0,3.9024870721497167,21.3976,1972,AURORA-774.
+FP16,reference,,none,FP16,2048,0.9,1,1,,0.4132,2018,AURORA-7786.
+SKVQ Baseline,baseline,skvq,token,Uniform K2/V2,2048,0.9,1,0,5.804532577903683,108.7135,2018,"The report included ordinary project milestones, scheduling details, and meeting summaries. Regional coordinators shared travel logistics, vendor renewals, and meeting"
+TurboQuant Baseline,baseline,turboquant,token,Uniform K2/V2,2048,0.9,1,0,6.217791411042945,13.3202,2018,AURORA 766.
+Hybrid+SKVQ+Block,method,skvq,hybrid,Uniform K2/V2,2048,0.9,1,0,4.338803599788248,99.7397,2018,"Several teams discussed documentation updates, onboarding checklists, and archive cleanup. The report included ordinary project milestones, scheduling details, and meeting"
+Hybrid+TQ+Block,method,turboquant,hybrid,Uniform K2/V2,2048,0.9,1,0,4.5375139977603585,13.3744,2018,AURORA786.
+Hybrid+TQ+Block+PageMix,method,turboquant,hybrid,"Mixed high K4/V4, low K2/V2",2048,0.9,1,0,3.9359223300970876,22.4983,2018,AURORA-786.
+Hybrid+TQ+RandomMix,ablation,turboquant,hybrid,"Mixed high K4/V4, low K2/V2",2048,0.9,1,0,3.9359223300970876,21.6736,2018,AURORA-786.
+FP16,reference,,none,FP16,2048,0.9,2,1,,0.4071,1972,AURORA-7823.
+SKVQ Baseline,baseline,skvq,token,Uniform K2/V2,2048,0.9,2,0,5.7764960346070655,103.7615,1972,"The report included ordinary project milestones, scheduling details, and meeting summaries. Regional coordinators shared travel logistics, vendor renewals, and"
+TurboQuant Baseline,baseline,turboquant,token,Uniform K2/V2,2048,0.9,2,0,6.22992125984252,13.1239,1972,Aurora782.
+Hybrid+SKVQ+Block,method,skvq,hybrid,Uniform K2/V2,2048,0.9,2,0,4.298283261802575,97.0763,1972,"The report included ordinary project milestones, scheduling details, and meeting summaries. Regional coordinators shared travel logistics, vendor renewals, and quarter"
+Hybrid+TQ+Block,method,turboquant,hybrid,Uniform K2/V2,2048,0.9,2,0,4.481900452488688,12.9015,1972,AURORA-782.
+Hybrid+TQ+Block+PageMix,method,turboquant,hybrid,"Mixed high K4/V4, low K2/V2",2048,0.9,2,1,3.8967805357581717,22.6831,1972,AURORA-7823.
+Hybrid+TQ+RandomMix,ablation,turboquant,hybrid,"Mixed high K4/V4, low K2/V2",2048,0.9,2,1,3.8967805357581717,21.8384,1972,AURORA-7823.
+FP16,reference,,none,FP16,4096,0.1,0,1,,0.6983,4022,AURORA-7749.
+SKVQ Baseline,baseline,skvq,token,Uniform K2/V2,4096,0.1,0,0,5.783803068141277,2180.3702,4022,"The secret committee reviewed routine budget notes and office maintenance plans. Several teams discussed budget updates, onboarding checklists, and onboarding archives"
+TurboQuant Baseline,baseline,turboquant,token,Uniform K2/V2,4096,0.1,0,0,6.357647058823529,116.4109,4022,"AURORA 774-project milestones, scheduling details, and meeting summaries. Several teams discussed documentation updates, onboarding"
+Hybrid+SKVQ+Block,method,skvq,hybrid,Uniform K2/V2,4096,0.1,0,0,4.942682926829268,2104.6459,4022,"The report included ordinary project milestones, scheduling details, and meeting summaries.
+Question: What is the secret operational decision?
+Answer:"
+Hybrid+TQ+Block,method,turboquant,hybrid,Uniform K2/V2,4096,0.1,0,0,5.276178010471204,44.6129,4022,AURORA 7749
+Hybrid+TQ+Block+PageMix,method,turboquant,hybrid,"Mixed high K4/V4, low K2/V2",4096,0.1,0,0,4.474538642985986,53.5186,4022,AURORA 7749
+Hybrid+TQ+RandomMix,ablation,turboquant,hybrid,"Mixed high K4/V4, low K2/V2",4096,0.1,0,1,4.529064869418702,58.8745,4022,AURORA-7749.
+FP16,reference,,none,FP16,4096,0.1,1,1,,0.7201,4118,AURORA-7786.
+SKVQ Baseline,baseline,skvq,token,Uniform K2/V2,4096,0.1,1,0,5.784593935169048,2250.4122,4118,"The report included ordinary project milestones, scheduling details, and meeting summaries.
+
+Several teams discussed ordinary milestones, and meeting"
+TurboQuant Baseline,baseline,turboquant,token,Uniform K2/V2,4096,0.1,1,0,6.358620689655172,122.8766,4118,"The committee reviewed routine budget notes and office maintenance plans.
+Several teams discussed documentation updates, onboarding checklists, and archive cleanup."
+Hybrid+SKVQ+Block,method,skvq,hybrid,Uniform K2/V2,4096,0.1,1,0,4.959952181709504,2187.3140,4118,"The report included ordinary project milestones, scheduling details, and meeting summaries.
+
+Question: What is the secret project milestones, sched"
+Hybrid+TQ+Block,method,turboquant,hybrid,Uniform K2/V2,4096,0.1,1,0,5.357096565132858,64.4995,4118,"The secret project code name is ""Aurora 789."""
+Hybrid+TQ+Block+PageMix,method,turboquant,hybrid,"Mixed high K4/V4, low K2/V2",4096,0.1,1,0,4.541254125412541,59.7856,4118,The secret project code name is Project Aurora.
+Hybrid+TQ+RandomMix,ablation,turboquant,hybrid,"Mixed high K4/V4, low K2/V2",4096,0.1,1,1,4.518032786885246,77.8304,4118,The secret project code name is AURORA-7786.
+FP16,reference,,none,FP16,4096,0.1,2,1,,0.6959,4022,AURORA-7823.
+SKVQ Baseline,baseline,skvq,token,Uniform K2/V2,4096,0.1,2,0,5.783803068141277,2206.8270,4022,"The report included in this paragraph of background material.
+
+The report included in this paragraph of background material.
+
+The report included in this paragraph of"
+TurboQuant Baseline,baseline,turboquant,token,Uniform K2/V2,4096,0.1,2,0,6.357647058823529,121.7650,4022,"The committee reviewed routine budget notes and office maintenance plans. Several teams discussed updates, onboarding checklists, and archive cleanup.
+Question: What"
+Hybrid+SKVQ+Block,method,skvq,hybrid,Uniform K2/V2,4096,0.1,2,0,4.942682926829268,2242.8501,4022,"The report included ordinary project milestones, scheduling details, and meeting summaries. Regional coordinators shared travel logistics, vendor renewals, and quarter"
+Hybrid+TQ+Block,method,turboquant,hybrid,Uniform K2/V2,4096,0.1,2,0,5.276178010471204,49.7764,4022,AURORA-7890
+Hybrid+TQ+Block+PageMix,method,turboquant,hybrid,"Mixed high K4/V4, low K2/V2",4096,0.1,2,1,4.529064869418702,61.8575,4022,AURORA-7823.
+Hybrid+TQ+RandomMix,ablation,turboquant,hybrid,"Mixed high K4/V4, low K2/V2",4096,0.1,2,1,4.529064869418702,63.7312,4022,AURORA-7823.
+FP16,reference,,none,FP16,4096,0.5,0,1,,0.6949,4022,AURORA-7749.
+SKVQ Baseline,baseline,skvq,token,Uniform K2/V2,4096,0.5,0,0,5.783803068141277,2346.7372,4022,"The report included ordinary project milestones, scheduling details, and meeting summaries.
+
+The report included ordinary project milestones, on"
+TurboQuant Baseline,baseline,turboquant,token,Uniform K2/V2,4096,0.5,0,0,6.357647058823529,124.1265,4022,"The code name is Project Aurora.
+The committee reviewed routine budget notes and office maintenance plans. Several teams discussed documentation updates, onboarding checklists"
+Hybrid+SKVQ+Block,method,skvq,hybrid,Uniform K2/V2,4096,0.5,0,0,4.942682926829268,2169.0018,4022,"The report included ordinary project milestones, scheduling details, and meeting summaries. Regional coordinators shared travel logistics, vendor renewals, and quarter"
+Hybrid+TQ+Block,method,turboquant,hybrid,Uniform K2/V2,4096,0.5,0,1,5.276178010471204,44.9539,4022,AURORA-7749
+Hybrid+TQ+Block+PageMix,method,turboquant,hybrid,"Mixed high K4/V4, low K2/V2",4096,0.5,0,0,4.474538642985986,56.2872,4022,AURORA-779.
+Hybrid+TQ+RandomMix,ablation,turboquant,hybrid,"Mixed high K4/V4, low K2/V2",4096,0.5,0,0,4.478399777746909,50.5446,4022,AURORA-749
+FP16,reference,,none,FP16,4096,0.5,1,1,,0.7118,4118,AURORA-7786.
+SKVQ Baseline,baseline,skvq,token,Uniform K2/V2,4096,0.5,1,0,5.784593935169048,2287.3961,4118,"The report included ordinary project milestones, scheduling details, and meeting summaries.
+
+Several teams shared travel logistics, and quarterly"
+TurboQuant Baseline,baseline,turboquant,token,Uniform K2/V2,4096,0.5,1,0,6.358620689655172,121.4620,4118,The secret operational decisions were included in this paragraph of background material. The committee reviewed routine budget notes and office maintenance plans. No sensitive operational dec
+Hybrid+SKVQ+Block,method,skvq,hybrid,Uniform K2/V2,4096,0.5,1,0,4.959952181709504,2186.5078,4118,"The report included ordinary project milestones, scheduling details, and meeting summaries. Regional coordinators shared travel logistics, and meeting, and onboard"
+Hybrid+TQ+Block,method,turboquant,hybrid,Uniform K2/V2,4096,0.5,1,0,5.297817715019256,48.1006,4118,AURORA-789.
+Hybrid+TQ+Block+PageMix,method,turboquant,hybrid,"Mixed high K4/V4, low K2/V2",4096,0.5,1,0,4.521881838074398,72.9660,4118,The secret project code name is AURORA-786.
+Hybrid+TQ+RandomMix,ablation,turboquant,hybrid,"Mixed high K4/V4, low K2/V2",4096,0.5,1,0,4.521881838074398,76.2137,4118,The secret project code name is AURORA-786.
+FP16,reference,,none,FP16,4096,0.5,2,1,,0.6924,4022,AURORA-7823.
+SKVQ Baseline,baseline,skvq,token,Uniform K2/V2,4096,0.5,2,0,5.783803068141277,2191.1542,4022,"The report included ordinary project milestones, scheduling details, and meeting summaries. Regional coordinators shared travel logistics, and quarterly reminders"
+TurboQuant Baseline,baseline,turboquant,token,Uniform K2/V2,4096,0.5,2,0,6.357647058823529,116.3454,4022,"The secret project name was Project Ares.
+
+The report included ordinary project milestones, scheduling details, and meeting summaries. Regional coordinators"
+Hybrid+SKVQ+Block,method,skvq,hybrid,Uniform K2/V2,4096,0.5,2,0,4.942682926829268,2091.8702,4022,"The report included ordinary project milestones, scheduling details, and meeting summaries.
+The report included ordinary project milestones, scheduling details,"
+Hybrid+TQ+Block,method,turboquant,hybrid,Uniform K2/V2,4096,0.5,2,0,5.339920948616601,112.9630,4022,"The report included ordinary project milestones, scheduling details, and meeting summaries. Regional coordinators shared travel logistics, vendor renewals, and quarter"
+Hybrid+TQ+Block+PageMix,method,turboquant,hybrid,"Mixed high K4/V4, low K2/V2",4096,0.5,2,0,4.505210504376824,121.3667,4022,"The report included ordinary project milestones, scheduling details, and meeting summaries. No sensitive operational decisions were included in this paragraph of background material"
+Hybrid+TQ+RandomMix,ablation,turboquant,hybrid,"Mixed high K4/V4, low K2/V2",4096,0.5,2,1,4.529064869418702,57.8948,4022,AURORA-7823.
+FP16,reference,,none,FP16,4096,0.9,0,1,,0.6916,4022,AURORA-7749.
+SKVQ Baseline,baseline,skvq,token,Uniform K2/V2,4096,0.9,0,0,5.783803068141277,2181.3063,4022,"The report included ordinary project milestones, scheduling details, and meeting summaries.
+
+
+The report included ordinary project milestones, scheduling"
+TurboQuant Baseline,baseline,turboquant,token,Uniform K2/V2,4096,0.9,0,0,6.357647058823529,119.2655,4022,"AURORA-774.
+The committee reviewed routine budget notes and office maintenance plans. Several teams discussed documentation updates, onboarding check"
+Hybrid+SKVQ+Block,method,skvq,hybrid,Uniform K2/V2,4096,0.9,0,0,4.942682926829268,2089.4745,4022,"The committee reviewed routine budget notes and office maintenance plans. Several teams discussed documentation updates, onboarding checklists, and archives. The report included ordinary"
+Hybrid+TQ+Block,method,turboquant,hybrid,Uniform K2/V2,4096,0.9,0,1,5.365269461077844,47.2007,4022,AURORA-7749.
+Hybrid+TQ+Block+PageMix,method,turboquant,hybrid,"Mixed high K4/V4, low K2/V2",4096,0.9,0,0,4.529064869418702,58.9221,4022,AURORA-7799.
+Hybrid+TQ+RandomMix,ablation,turboquant,hybrid,"Mixed high K4/V4, low K2/V2",4096,0.9,0,1,4.529064869418702,55.7165,4022,AURORA-7749.
+FP16,reference,,none,FP16,4096,0.9,1,1,,0.7158,4118,AURORA-7786.
+SKVQ Baseline,baseline,skvq,token,Uniform K2/V2,4096,0.9,1,0,5.784593935169048,2224.8649,4118,"The report included ordinary project milestones, and meeting summaries.
+
+Several teams discussed, onboarding checklists, onboarding check"
+TurboQuant Baseline,baseline,turboquant,token,Uniform K2/V2,4096,0.9,1,0,6.358620689655172,118.7383,4118,"The secret project code name is AURORA-77777.
+
+Several teams discussed documentation, onboarding details, and"
+Hybrid+SKVQ+Block,method,skvq,hybrid,Uniform K2/V2,4096,0.9,1,0,4.959952181709504,2148.5526,4118,"The report included ordinary project milestones, scheduling details, and meeting summaries. Regional coordinators, and meeting, and quarterly reminders,"
+Hybrid+TQ+Block,method,turboquant,hybrid,Uniform K2/V2,4096,0.9,1,0,5.303341902313624,41.3964,4118,Aurora 7786.
+Hybrid+TQ+Block+PageMix,method,turboquant,hybrid,"Mixed high K4/V4, low K2/V2",4096,0.9,1,0,4.487698790267772,55.8281,4118,AURORA-786.
+Hybrid+TQ+RandomMix,ablation,turboquant,hybrid,"Mixed high K4/V4, low K2/V2",4096,0.9,1,1,4.541254125412541,57.0907,4118,AURORA-7786.
+FP16,reference,,none,FP16,4096,0.9,2,1,,0.6956,4022,AURORA-7823.
+SKVQ Baseline,baseline,skvq,token,Uniform K2/V2,4096,0.9,2,0,5.783803068141277,2168.3726,4022,"The report included ordinary project milestones, scheduling details, and meeting summaries. Regional coordinators shared travel logistics, and quarterly reminders"
+TurboQuant Baseline,baseline,turboquant,token,Uniform K2/V2,4096,0.9,2,1,6.357647058823529,117.6417,4022,"The secret project code name is AURORA-7823.
+
+The report included ordinary project milestones, scheduling details, and"
+Hybrid+SKVQ+Block,method,skvq,hybrid,Uniform K2/V2,4096,0.9,2,0,4.942682926829268,2091.0080,4022,"The report included ordinary project milestones, scheduling details, and meeting summaries.
+Question: What is the ordinary project milestones, scheduling"
+Hybrid+TQ+Block,method,turboquant,hybrid,Uniform K2/V2,4096,0.9,2,0,5.276178010471204,44.1888,4022,AURORA-782.
+Hybrid+TQ+Block+PageMix,method,turboquant,hybrid,"Mixed high K4/V4, low K2/V2",4096,0.9,2,0,4.474538642985986,55.2395,4022,AURORA-782.
+Hybrid+TQ+RandomMix,ablation,turboquant,hybrid,"Mixed high K4/V4, low K2/V2",4096,0.9,2,0,4.474538642985986,52.5570,4022,AURORA-782.
+TurboQuant pure (tq_replace),paper_baseline,turboquant,hybrid,Uniform K2/V2,2048,0.1,0,1,5.140447615958482,19.8307,1972,AURORA-7749
+TurboQuant pure (tq_replace),paper_baseline,turboquant,hybrid,Uniform K2/V2,2048,0.1,1,1,5.190019193857966,21.2234,2018,AURORA-7786.
+TurboQuant pure (tq_replace),paper_baseline,turboquant,hybrid,Uniform K2/V2,2048,0.1,2,1,5.129731478485927,20.6743,1972,AURORA-7823.
+TurboQuant pure (tq_replace),paper_baseline,turboquant,hybrid,Uniform K2/V2,2048,0.5,0,1,5.129731478485927,19.4997,1972,AURORA-7749.
+TurboQuant pure (tq_replace),paper_baseline,turboquant,hybrid,Uniform K2/V2,2048,0.5,1,0,5.211575562700965,16.5607,2018,AURORA-786
+TurboQuant pure (tq_replace),paper_baseline,turboquant,hybrid,Uniform K2/V2,2048,0.5,2,0,5.140447615958482,18.0192,1972,AURORA-782.
+TurboQuant pure (tq_replace),paper_baseline,turboquant,hybrid,Uniform K2/V2,2048,0.9,0,1,5.129731478485927,19.2824,1972,AURORA-7749.
+TurboQuant pure (tq_replace),paper_baseline,turboquant,hybrid,Uniform K2/V2,2048,0.9,1,1,5.190019193857966,20.0281,2018,AURORA-7786.
+TurboQuant pure (tq_replace),paper_baseline,turboquant,hybrid,Uniform K2/V2,2048,0.9,2,1,5.129731478485927,20.8141,1972,AURORA-7823.
+TurboQuant pure (tq_replace),paper_baseline,turboquant,hybrid,Uniform K2/V2,4096,0.1,0,0,6.113364928909952,30.8195,4022,AURORA-749.
+TurboQuant pure (tq_replace),paper_baseline,turboquant,hybrid,Uniform K2/V2,4096,0.1,1,0,6.140226892319137,29.9806,4118,AURORA-786.
+TurboQuant pure (tq_replace),paper_baseline,turboquant,hybrid,Uniform K2/V2,4096,0.1,2,1,6.236658932714617,31.6278,4022,AURORA-7823.
+TurboQuant pure (tq_replace),paper_baseline,turboquant,hybrid,Uniform K2/V2,4096,0.5,0,1,6.236658932714617,31.6665,4022,AURORA-7749.
+TurboQuant pure (tq_replace),paper_baseline,turboquant,hybrid,Uniform K2/V2,4096,0.5,1,1,6.140226892319137,31.2831,4118,AURORA-7786
+TurboQuant pure (tq_replace),paper_baseline,turboquant,hybrid,Uniform K2/V2,4096,0.5,2,1,6.236658932714617,32.6726,4022,AURORA-7823.
+TurboQuant pure (tq_replace),paper_baseline,turboquant,hybrid,Uniform K2/V2,4096,0.9,0,1,6.236658932714617,31.9121,4022,AURORA-7749.
+TurboQuant pure (tq_replace),paper_baseline,turboquant,hybrid,Uniform K2/V2,4096,0.9,1,0,6.140226892319137,29.8632,4118,AURORA-776.
+TurboQuant pure (tq_replace),paper_baseline,turboquant,hybrid,Uniform K2/V2,4096,0.9,2,1,6.236658932714617,32.4851,4022,AURORA-7823.
+SKVQ skvq_baseline (native),paper_baseline,skvq,sliding_window,Uniform K2/V2,2048,0.1,0,0,,1.7453,1972,"AURORA-774.
+
+The secret project code name is AURORA-774."
+SKVQ skvq_baseline (native),paper_baseline,skvq,sliding_window,Uniform K2/V2,2048,0.1,1,1,,1.6511,2018,"AURORA-7786.
+
+In the end, the secret project code name was AURORA-7786."
+SKVQ skvq_baseline (native),paper_baseline,skvq,sliding_window,Uniform K2/V2,2048,0.1,2,1,,1.5809,1972,"AURORA-7823.
+
+The secret project code name is AURORA-7823.
+
+The report"
+SKVQ skvq_baseline (native),paper_baseline,skvq,sliding_window,Uniform K2/V2,2048,0.5,0,0,,0.9410,1972,The secret project code name is AURORA774.
+SKVQ skvq_baseline (native),paper_baseline,skvq,sliding_window,Uniform K2/V2,2048,0.5,1,0,,1.5539,2018,"AURORA-786.
+
+Background material.
+
+Several teams discussed documentation updates, onboarding checklists, and archive"
+SKVQ skvq_baseline (native),paper_baseline,skvq,sliding_window,Uniform K2/V2,2048,0.5,2,1,,0.9689,1972,The secret project code name is AURORA-7823.
+SKVQ skvq_baseline (native),paper_baseline,skvq,sliding_window,Uniform K2/V2,2048,0.9,0,0,,1.5097,1972,The secret project code name is AURORA7749.
+SKVQ skvq_baseline (native),paper_baseline,skvq,sliding_window,Uniform K2/V2,2048,0.9,1,0,,0.7050,2018,AURORA-786.
+SKVQ skvq_baseline (native),paper_baseline,skvq,sliding_window,Uniform K2/V2,2048,0.9,2,1,,1.5071,1972,"AURORA-7823.
+
+The report included ordinary project milestones, scheduling details, and meeting summaries. Regional coordin"
+SKVQ skvq_baseline (native),paper_baseline,skvq,sliding_window,Uniform K2/V2,4096,0.1,0,0,,2.5009,4022,"The secret project code was reviewed and shared with Regional coordinators.
+Question: What is the meeting code?
+Answer: The report included ordinary project mil"
+SKVQ skvq_baseline (native),paper_baseline,skvq,sliding_window,Uniform K2/V2,4096,0.1,1,0,,2.5977,4118,"The secret project code name.
+Question: What is the meeting milestones?
+Answer: What is the meeting milestones.
+Question: What"
+SKVQ skvq_baseline (native),paper_baseline,skvq,sliding_window,Uniform K2/V2,4096,0.1,2,0,,2.5246,4022,"The secret project code was A7P 123459.
+Question: What is the secret project code name?
+Answer: The secret"
+SKVQ skvq_baseline (native),paper_baseline,skvq,sliding_window,Uniform K2/V2,4096,0.5,0,0,,2.5214,4022,"The secret project code name is AURORA79.
+
+Question: What is the internal operational code?
+Answer: The internal project code"
+SKVQ skvq_baseline (native),paper_baseline,skvq,sliding_window,Uniform K2/V2,4096,0.5,1,0,,2.5841,4118,"The secret project code included in this paragraph of background material.
+Question: What is the secret?
+Answer: What is the secret team maintained.
+Question"
+SKVQ skvq_baseline (native),paper_baseline,skvq,sliding_window,Uniform K2/V2,4096,0.5,2,0,,2.5230,4022,"The report included ordinary project milestones, scheduling details, and meeting summaries. Regional coordinators shared travel logistics, vendor renewals, and quarter"
+SKVQ skvq_baseline (native),paper_baseline,skvq,sliding_window,Uniform K2/V2,4096,0.9,0,0,,2.5378,4022,"The secret project code name is internal retrievals.
+Question: What is the secret project code name?
+Answer: The secret project code name is internal"
+SKVQ skvq_baseline (native),paper_baseline,skvq,sliding_window,Uniform K2/V2,4096,0.9,1,0,,2.5999,4118,"The secret project code name is AU76K.
+
+Question: What is the secret?
+Answer: The secret.
+Question: What is"
+SKVQ skvq_baseline (native),paper_baseline,skvq,sliding_window,Uniform K2/V2,4096,0.9,2,0,,2.5370,4022,"The secret project milestones, scheduling details, and meeting summaries.
+
+The report included ordinary project milestones, scheduling details, and"

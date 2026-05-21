@@ -1,0 +1,2 @@
+dataset,seq_len,method,kbits,vbits,status,ppl,elapsed_sec,peak_allocated_gb,n_eval,calib_dataset,calib_samples,group_size,window_size,sink,clip,error
+wikitext2,512,fp16,2,2,ok,7.865305,0.13,13.278,2,wikitext2,8,128,128,5,0.96,

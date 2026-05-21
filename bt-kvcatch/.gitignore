@@ -51,8 +51,15 @@ huggingface/
 nohup.out
 out/
 outputs/
-runs/
 wandb/
+
+# Server experiment outputs (track results; ignore noisy logs only)
+bt-kvcatch/turboquant-pytorch/runs/**/*.log
+bt-kvcatch/turboquant-pytorch/runs/**/nohup.out
+# Allow calibration / reorder artifacts under runs & experiments
+!bt-kvcatch/turboquant-pytorch/runs/**/reorder*.pt
+!bt-kvcatch/turboquant-pytorch/runs/**/reorder_meta.pt
+!bt-kvcatch/turboquant-pytorch/experiments/**/reorder*.pt
 
 # --- Jupyter ---
 .ipynb_checkpoints/

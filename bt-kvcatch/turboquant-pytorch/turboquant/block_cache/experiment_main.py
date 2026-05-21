@@ -19,7 +19,9 @@ from __future__ import annotations
 
 import argparse
 import csv
+import gc
 import json
+import re
 import time
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -52,6 +54,7 @@ class MethodSpec:
     high_value_bits: float = 4
     low_key_bits: float = 2
     low_value_bits: float = 2
+    paper_baseline: str | None = None
 
 
 @dataclass
@@ -152,6 +155,28 @@ def build_methods(args) -> list[MethodSpec]:
             value_bits=args.value_bits,
         ),
         MethodSpec(
+            name="SKVQ skvq_baseline (native)",
+            backend="skvq_native",
+            quant_backend="skvq",
+            policy="window",
+            method_group="paper_baseline",
+            page_quant_scheme=baseline_scheme,
+            key_bits=args.key_bits,
+            value_bits=args.value_bits,
+            paper_baseline="skvq_native",
+        ),
+        MethodSpec(
+            name="TurboQuant pure (tq_replace)",
+            backend="block_tq",
+            quant_backend="turboquant",
+            policy="hybrid",
+            method_group="paper_baseline",
+            page_quant_scheme=baseline_scheme,
+            key_bits=args.key_bits,
+            value_bits=args.value_bits,
+            paper_baseline="tq_pure",
+        ),
+        MethodSpec(
             name="Hybrid+SKVQ+Block",
             backend="block_skvq",
             quant_backend="skvq",
@@ -210,17 +235,36 @@ def build_methods(args) -> list[MethodSpec]:
     return methods
 
 
+def _paper_tq_pure_policy():
+    from turboquant.block_cache.skvq_native_integration import PAPER_SINK, PAPER_WINDOW
+
+    return HybridPolicy(sink_size=PAPER_SINK, window_size=PAPER_WINDOW)
+
+
 def _cache_factory(args, method: MethodSpec) -> Callable[[], BlockKVCache | None]:
-    if method.quant_backend is None:
+    if method.quant_backend is None or method.backend == "skvq_native":
         return lambda: None
 
     def make_cache() -> BlockKVCache:
+        if method.paper_baseline == "tq_pure":
+            from turboquant.block_cache.skvq_native_integration import PAPER_CLIP
+
+            policy = _paper_tq_pure_policy()
+            reorder_file = None
+            protected_layers = 0
+            clipping = PAPER_CLIP
+        else:
+            policy = _policy_from_name(method.policy, args)
+            reorder_file = args.reorder_file
+            protected_layers = args.protected_layers
+            clipping = args.clipping
+
         cfg = BlockCacheConfig(
             block_size=args.block_size,
             key_bits=method.key_bits,
             value_bits=method.value_bits,
             granularity=args.granularity,
-            policy=_policy_from_name(method.policy, args),
+            policy=policy,
             quant_backend=method.quant_backend,
             mixed_precision=method.mixed_precision,
             importance_metric=method.importance_metric,
@@ -230,19 +274,242 @@ def _cache_factory(args, method: MethodSpec) -> Callable[[], BlockKVCache | None
             low_key_bits=method.low_key_bits,
             low_value_bits=method.low_value_bits,
             num_layers=args.num_layers,
-            protected_layers=args.protected_layers,
+            protected_layers=protected_layers,
             protected_key_bits=args.protected_key_bits,
             protected_value_bits=args.protected_value_bits,
             group_size=args.group_size,
             key_group_size=args.key_group_size,
             value_group_size=args.value_group_size,
-            clipping=args.clipping,
-            reorder_file=args.reorder_file,
+            clipping=clipping,
+            reorder_file=reorder_file,
             max_cached_decompressed_blocks=args.max_cached_decompressed_blocks,
         )
         return BlockKVCache(cfg)
 
     return make_cache
+
+
+def _method_config(args, method: MethodSpec) -> dict:
+    if method.paper_baseline == "tq_pure":
+        from turboquant.block_cache.skvq_native_integration import (
+            PAPER_CLIP,
+            PAPER_SINK,
+            PAPER_WINDOW,
+        )
+
+        return {
+            "block_size": args.block_size,
+            "method_group": method.method_group,
+            "policy": "hybrid",
+            "quant_backend": method.quant_backend,
+            "page_quant_scheme": method.page_quant_scheme,
+            "sink": PAPER_SINK,
+            "window": PAPER_WINDOW,
+            "key_bits": method.key_bits,
+            "value_bits": method.value_bits,
+            "mixed_precision": False,
+            "paper_baseline": "tq_pure",
+            "reorder": False,
+            "protected_layers": 0,
+            "clipping": PAPER_CLIP,
+            "integration": "turboquant-pytorch/BlockKVCache",
+        }
+    if method.paper_baseline == "skvq_native":
+        from turboquant.block_cache.skvq_native_integration import skvq_native_config
+
+        cfg = skvq_native_config(
+            key_bits=method.key_bits,
+            value_bits=method.value_bits,
+            reorder_file=args.reorder_file,
+        )
+        cfg["method_group"] = method.method_group
+        cfg["page_quant_scheme"] = method.page_quant_scheme
+        cfg["quant_backend"] = method.quant_backend
+        return cfg
+    return {
+        "block_size": args.block_size,
+        "method_group": method.method_group,
+        "sink": args.sink if method.policy == "hybrid" else None,
+        "window": args.window if method.policy == "hybrid" else None,
+        "policy": method.policy,
+        "quant_backend": method.quant_backend,
+        "page_quant_scheme": method.page_quant_scheme,
+        "key_bits": method.key_bits,
+        "value_bits": method.value_bits,
+        "mixed_precision": method.mixed_precision,
+        "importance_metric": method.importance_metric if method.mixed_precision else None,
+        "important_ratio": args.important_ratio if method.mixed_precision else None,
+        "high_key_bits": method.high_key_bits if method.mixed_precision else None,
+        "high_value_bits": method.high_value_bits if method.mixed_precision else None,
+        "low_key_bits": method.low_key_bits if method.mixed_precision else None,
+        "low_value_bits": method.low_value_bits if method.mixed_precision else None,
+        "num_layers": args.num_layers,
+        "protected_layers": args.protected_layers,
+        "protected_key_bits": args.protected_key_bits,
+        "protected_value_bits": args.protected_value_bits,
+        "group_size": args.group_size,
+        "key_group_size": args.key_group_size,
+        "value_group_size": args.value_group_size,
+        "max_cached_decompressed_blocks": args.max_cached_decompressed_blocks,
+    }
+
+
+def _niah_run_key(method: str, context_length: int, position: float, seed: int) -> str:
+    return f"{method}|{context_length}|{position:.4f}|{seed}"
+
+
+def _parse_resume_log(log_path: Path) -> set[str]:
+    pattern = re.compile(
+        r"^=== method=(.+?) ctx=(\d+) pos=([\d.]+) seed=(\d+) ===$"
+    )
+    completed: set[str] = set()
+    for line in log_path.read_text(encoding="utf-8", errors="replace").splitlines():
+        m = pattern.match(line.strip())
+        if m:
+            completed.add(
+                _niah_run_key(
+                    m.group(1),
+                    int(m.group(2)),
+                    float(m.group(3)),
+                    int(m.group(4)),
+                )
+            )
+    return completed
+
+
+def _load_results_jsonl(jsonl_path: Path) -> tuple[list[MainResult], set[str]]:
+    results: list[MainResult] = []
+    completed: set[str] = set()
+    if not jsonl_path.exists():
+        return results, completed
+    for line in jsonl_path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        row = json.loads(line)
+        result = MainResult(**row)
+        results.append(result)
+        completed.add(
+            _niah_run_key(
+                result.method,
+                result.context_length,
+                result.position,
+                result.seed,
+            )
+        )
+    return results, completed
+
+
+def _append_result_jsonl(jsonl_path: Path, result: MainResult) -> None:
+    jsonl_path.parent.mkdir(parents=True, exist_ok=True)
+    with jsonl_path.open("a", encoding="utf-8") as f:
+        f.write(json.dumps(asdict(result), ensure_ascii=False) + "\n")
+
+
+@torch.no_grad()
+def run_niah_case_skvq_native(
+    model,
+    tokenizer,
+    args,
+    method: MethodSpec,
+    context_length: int,
+    position: float,
+    seed: int,
+) -> MainResult:
+    from turboquant.block_cache.skvq_native_integration import (
+        build_skvq_baseline_manager,
+        clear_quantizer,
+        detach_quantizer,
+        plug_quantizer,
+    )
+
+    if args.reorder_file is None:
+        raise ValueError("skvq_native requires --reorder-file")
+
+    prompt, expected = build_prompt(tokenizer, context_length, position, seed)
+    device = _model_input_device(model)
+    inputs = tokenizer(
+        prompt,
+        return_tensors="pt",
+        truncation=True,
+        max_length=context_length + args.prompt_slack,
+    ).to(device)
+    if not args.pass_attention_mask:
+        inputs.pop("attention_mask", None)
+
+    detach_quantizer(model)
+    manager = build_skvq_baseline_manager(
+        model,
+        reorder_file=args.reorder_file,
+        key_bits=method.key_bits,
+        value_bits=method.value_bits,
+        group_size=args.group_size,
+        skvq_root=args.skvq_root,
+    )
+    plug_quantizer(model, manager)
+
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+
+    from turboquant.block_cache.skvq_native_integration import skvq_native_generate
+
+    started = time.perf_counter()
+    oom = False
+    error_msg = ""
+    try:
+        sequences = skvq_native_generate(
+            model,
+            tokenizer,
+            inputs,
+            max_new_tokens=args.max_new_tokens,
+        )
+        new_tokens = sequences[0, inputs.input_ids.shape[1] :]
+        response = tokenizer.decode(new_tokens, skip_special_tokens=True).strip()
+        found = expected.lower() in response.lower()
+        output_tokens = int(new_tokens.shape[0])
+    except torch.cuda.OutOfMemoryError as exc:
+        oom = True
+        error_msg = str(exc).splitlines()[0][:500]
+        response = ""
+        found = False
+        output_tokens = 0
+        sequences = None
+    finally:
+        seconds = time.perf_counter() - started
+        clear_quantizer(model)
+        detach_quantizer(model)
+        gc.collect()
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+
+    config = _method_config(args, method)
+    if oom:
+        config["status"] = "oom"
+        config["error"] = error_msg
+    elif error_msg:
+        config["status"] = "error"
+        config["error"] = error_msg
+
+    return MainResult(
+        method=method.name,
+        backend=method.backend,
+        model=args.model,
+        context_length=context_length,
+        position=position,
+        seed=seed,
+        found=found,
+        expected=expected,
+        response=response,
+        input_tokens=int(inputs.input_ids.shape[1]),
+        output_tokens=output_tokens,
+        seconds=seconds,
+        compression_ratio=None,
+        n_compressed_blocks=None,
+        n_fp16_blocks=None,
+        bit_histogram=None,
+        precision_histogram=None,
+        config=config,
+    )
 
 
 @torch.no_grad()
@@ -312,32 +579,7 @@ def run_niah_case(
         n_fp16_blocks=report["n_fp16_blocks"] if report else None,
         bit_histogram=report["bit_histogram"] if report else None,
         precision_histogram=report["precision_histogram"] if report else None,
-        config={
-            "block_size": args.block_size,
-            "method_group": method.method_group,
-            "sink": args.sink if method.policy == "hybrid" else None,
-            "window": args.window if method.policy == "hybrid" else None,
-            "policy": method.policy,
-            "quant_backend": method.quant_backend,
-            "page_quant_scheme": method.page_quant_scheme,
-            "key_bits": method.key_bits,
-            "value_bits": method.value_bits,
-            "mixed_precision": method.mixed_precision,
-            "importance_metric": method.importance_metric if method.mixed_precision else None,
-            "important_ratio": args.important_ratio if method.mixed_precision else None,
-            "high_key_bits": method.high_key_bits if method.mixed_precision else None,
-            "high_value_bits": method.high_value_bits if method.mixed_precision else None,
-            "low_key_bits": method.low_key_bits if method.mixed_precision else None,
-            "low_value_bits": method.low_value_bits if method.mixed_precision else None,
-            "num_layers": args.num_layers,
-            "protected_layers": args.protected_layers,
-            "protected_key_bits": args.protected_key_bits,
-            "protected_value_bits": args.protected_value_bits,
-            "group_size": args.group_size,
-            "key_group_size": args.key_group_size,
-            "value_group_size": args.value_group_size,
-            "max_cached_decompressed_blocks": args.max_cached_decompressed_blocks,
-        },
+        config=_method_config(args, method),
     )
 
 
@@ -492,6 +734,23 @@ def main() -> None:
     parser.add_argument("--record-attentions", action="store_true")
     parser.add_argument("--output-dir", default=None)
     parser.add_argument("--include-random-mix", action="store_true")
+    parser.add_argument(
+        "--only-paper-baselines",
+        action="store_true",
+        help="Run only SKVQ skvq_baseline (native) and TurboQuant pure (tq_replace)",
+    )
+    parser.add_argument("--skvq-root", default=None, help="Path to SKVQ repo for native baseline")
+    parser.add_argument(
+        "--resume-log",
+        action="append",
+        default=None,
+        help="Skip keys already present in log file(s); repeatable",
+    )
+    parser.add_argument(
+        "--append-results",
+        action="store_true",
+        help="Load existing output-dir/main_results.jsonl and append new rows",
+    )
 
     parser.add_argument("--block-size", type=int, default=16)
     parser.add_argument("--sink", type=int, default=16)
@@ -523,7 +782,46 @@ def main() -> None:
         stamp = time.strftime("%Y%m%d_%H%M%S")
         args.output_dir = str(Path("runs") / f"main_exp_{stamp}")
 
-    from transformers import AutoModelForCausalLM, AutoTokenizer
+    from transformers import AutoConfig, AutoModelForCausalLM, AutoTokenizer
+
+    methods = build_methods(args)
+    if args.only_paper_baselines:
+        methods = [m for m in methods if m.paper_baseline is not None]
+
+    block_methods = [m for m in methods if m.backend != "skvq_native"]
+    native_methods = [m for m in methods if m.backend == "skvq_native"]
+
+    if args.num_layers is None:
+        cfg = AutoConfig.from_pretrained(
+            args.model,
+            local_files_only=args.local_files_only,
+            trust_remote_code=args.trust_remote_code,
+        )
+        args.num_layers = getattr(cfg, "num_hidden_layers", None)
+
+    output_dir = Path(args.output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    jsonl_path = output_dir / "main_exp_results.jsonl"
+
+    results: list[MainResult] = []
+    completed: set[str] = set()
+    if args.append_results:
+        results, completed = _load_results_jsonl(jsonl_path)
+        print(f"[resume] loaded {len(results)} rows from {jsonl_path}")
+    if args.resume_log:
+        for log_path in args.resume_log:
+            from_log = _parse_resume_log(Path(log_path))
+            completed |= from_log
+            print(f"[resume] {len(from_log)} keys from log {log_path}")
+
+    def _has_pending_block_work() -> bool:
+        for context_length in args.context_lengths:
+            for position in args.positions:
+                for seed in args.seeds:
+                    for method in block_methods:
+                        if _niah_run_key(method.name, context_length, position, seed) not in completed:
+                            return True
+        return False
 
     print(f"Loading tokenizer: {args.model}")
     tokenizer = AutoTokenizer.from_pretrained(
@@ -534,47 +832,149 @@ def main() -> None:
     if tokenizer.pad_token_id is None and tokenizer.eos_token_id is not None:
         tokenizer.pad_token = tokenizer.eos_token
 
-    print(f"Loading model: {args.model}")
-    model_kwargs = {
-        "local_files_only": args.local_files_only,
-        "trust_remote_code": args.trust_remote_code,
-        "device_map": args.device_map,
-        "dtype": _dtype_from_name(args.dtype),
-    }
-    attn_impl = args.attn_implementation or ("eager" if args.record_attentions else None)
-    if attn_impl is not None:
-        model_kwargs["attn_implementation"] = attn_impl
-    model = AutoModelForCausalLM.from_pretrained(args.model, **model_kwargs)
-    model.eval()
-    if args.num_layers is None:
-        args.num_layers = getattr(model.config, "num_hidden_layers", None)
+    model = None
+    if block_methods and _has_pending_block_work():
+        print(f"Loading HF model: {args.model}")
+        model_kwargs = {
+            "local_files_only": args.local_files_only,
+            "trust_remote_code": args.trust_remote_code,
+            "device_map": args.device_map,
+            "dtype": _dtype_from_name(args.dtype),
+        }
+        attn_impl = args.attn_implementation or ("eager" if args.record_attentions else None)
+        if attn_impl is not None:
+            model_kwargs["attn_implementation"] = attn_impl
+        model = AutoModelForCausalLM.from_pretrained(args.model, **model_kwargs)
+        model.eval()
 
-    results: list[MainResult] = []
-    methods = build_methods(args)
-    for context_length in args.context_lengths:
-        for position in args.positions:
-            for seed in args.seeds:
-                for method in methods:
-                    print(
-                        f"\n=== method={method.name} ctx={context_length} "
-                        f"pos={position:.2f} seed={seed} ==="
-                    )
-                    result = run_niah_case(
-                        model, tokenizer, args, method, context_length, position, seed
-                    )
-                    results.append(result)
-                    ratio = (
-                        f"{result.compression_ratio:.3f}x"
-                        if result.compression_ratio is not None
-                        else "-"
-                    )
-                    print(
-                        f"found={result.found} expected={result.expected} "
-                        f"tokens={result.input_tokens} ratio={ratio} "
-                        f"seconds={result.seconds:.2f}"
-                    )
-                    print(f"response={result.response[:240]!r}")
+    skipped = 0
 
+    def _run_method(method: MethodSpec, context_length: int, position: float, seed: int) -> None:
+        nonlocal skipped
+        key = _niah_run_key(method.name, context_length, position, seed)
+        if key in completed:
+            skipped += 1
+            print(
+                f"\n=== method={method.name} ctx={context_length} "
+                f"pos={position:.2f} seed={seed} === [skip resume]"
+            )
+            return
+        print(
+            f"\n=== method={method.name} ctx={context_length} "
+            f"pos={position:.2f} seed={seed} ==="
+        )
+        if method.backend == "skvq_native":
+            raise RuntimeError("skvq_native must run in native phase")
+        result = run_niah_case(model, tokenizer, args, method, context_length, position, seed)
+        results.append(result)
+        completed.add(key)
+        _append_result_jsonl(jsonl_path, result)
+        ratio = (
+            f"{result.compression_ratio:.3f}x"
+            if result.compression_ratio is not None
+            else "-"
+        )
+        print(
+            f"found={result.found} expected={result.expected} "
+            f"tokens={result.input_tokens} ratio={ratio} "
+            f"seconds={result.seconds:.2f}"
+        )
+        print(f"response={result.response[:240]!r}")
+
+    if block_methods and model is not None:
+        for context_length in args.context_lengths:
+            for position in args.positions:
+                for seed in args.seeds:
+                    for method in block_methods:
+                        _run_method(method, context_length, position, seed)
+        del model
+        model = None
+        gc.collect()
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+
+    if native_methods:
+        from turboquant.block_cache.skvq_native_integration import load_skvq_llama
+
+        print("\n=== Loading SKVQ native Llama model ===")
+        skvq_model, skvq_tokenizer = load_skvq_llama(
+            args.model,
+            skvq_root=args.skvq_root,
+            dtype=_dtype_from_name(args.dtype),
+            device_map=args.device_map,
+            local_files_only=args.local_files_only,
+            trust_remote_code=args.trust_remote_code,
+        )
+        for context_length in args.context_lengths:
+            for position in args.positions:
+                for seed in args.seeds:
+                    for method in native_methods:
+                        key = _niah_run_key(method.name, context_length, position, seed)
+                        if key in completed:
+                            skipped += 1
+                            print(
+                                f"\n=== method={method.name} ctx={context_length} "
+                                f"pos={position:.2f} seed={seed} === [skip resume]"
+                            )
+                            continue
+                        print(
+                            f"\n=== method={method.name} ctx={context_length} "
+                            f"pos={position:.2f} seed={seed} ==="
+                        )
+                        try:
+                            result = run_niah_case_skvq_native(
+                                skvq_model,
+                                skvq_tokenizer,
+                                args,
+                                method,
+                                context_length,
+                                position,
+                                seed,
+                            )
+                        except RuntimeError as exc:
+                            msg = str(exc).lower()
+                            if "out of memory" not in msg and "cuda error" not in msg:
+                                raise
+                            result = MainResult(
+                                method=method.name,
+                                backend=method.backend,
+                                model=args.model,
+                                context_length=context_length,
+                                position=position,
+                                seed=seed,
+                                found=False,
+                                expected="",
+                                response="",
+                                input_tokens=0,
+                                output_tokens=0,
+                                seconds=0.0,
+                                compression_ratio=None,
+                                n_compressed_blocks=None,
+                                n_fp16_blocks=None,
+                                bit_histogram=None,
+                                precision_histogram=None,
+                                config={
+                                    **_method_config(args, method),
+                                    "status": "oom",
+                                    "error": str(exc).splitlines()[0][:500],
+                                },
+                            )
+                        results.append(result)
+                        completed.add(key)
+                        _append_result_jsonl(jsonl_path, result)
+                        status = result.config.get("status", "ok")
+                        print(
+                            f"[{status}] found={result.found} expected={result.expected} "
+                            f"tokens={result.input_tokens} seconds={result.seconds:.2f}"
+                        )
+                        if result.response:
+                            print(f"response={result.response[:240]!r}")
+        del skvq_model
+        gc.collect()
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+
+    print(f"\n[resume] skipped {skipped} already-completed runs")
     _write_outputs(results, args)
 
 

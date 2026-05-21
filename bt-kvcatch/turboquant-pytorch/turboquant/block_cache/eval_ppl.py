@@ -31,6 +31,9 @@ from turboquant.block_cache import (
     TokenBlockPolicy,
     WindowBlockPolicy,
 )
+from turboquant.block_cache.bpw_metrics import attach_bpw_fields
+from turboquant.block_cache.v2_paper_cache import V2PaperCache
+from turboquant.block_cache.v3_flat_cache import V3FlatCache
 
 
 @dataclass
@@ -46,6 +49,10 @@ class PPLResult:
     avg_compressed_blocks: float | None
     avg_fp16_blocks: float | None
     config: dict
+    k_bpw: float | None = None
+    v_bpw: float | None = None
+    avg_bpw: float | None = None
+    effective_bpw: float | None = None
 
 
 def _parse_bits(value: str) -> float:
@@ -76,15 +83,38 @@ def _build_policy(args):
     if args.policy == "token":
         return TokenBlockPolicy()
     if args.policy == "window":
-        return WindowBlockPolicy(window_size=args.window)
+        return WindowBlockPolicy(window_size=args.window, sink_size=args.sink)
     if args.policy == "hybrid":
         return HybridPolicy(sink_size=args.sink, window_size=args.window)
     raise ValueError(f"unknown policy: {args.policy}")
 
 
-def _cache_factory(args, backend: str) -> Callable[[], BlockKVCache | None]:
+def _cache_factory(args, backend: str) -> Callable[[], BlockKVCache | V2PaperCache | V3FlatCache | None]:
     if backend == "dynamic":
         return lambda: None
+
+    if backend == "v2_paper":
+        def make_v2() -> V2PaperCache:
+            return V2PaperCache(
+                key_bits=int(args.key_bits),
+                value_bits=int(args.value_bits),
+                n_layers=int(args.num_layers or 32),
+                seed=42,
+            )
+
+        return make_v2
+
+    if backend == "v3_flat":
+        def make_v3() -> V3FlatCache:
+            return V3FlatCache(
+                key_bits=int(args.key_bits),
+                value_bits=int(args.value_bits),
+                residual_window=int(args.residual_window),
+                protected_layers=int(args.protected_layers),
+                n_layers=int(args.num_layers or 32),
+            )
+
+        return make_v3
 
     if backend not in {"block_tq", "block_tq_mix", "block_skvq", "block_skvq_mix"}:
         raise ValueError(f"unknown backend: {backend}")
@@ -215,7 +245,7 @@ def evaluate_backend(model, input_ids: torch.Tensor, args, backend: str) -> PPLR
             nll_sum += float(outputs.loss.item()) * valid_tokens
             n_loss_tokens += valid_tokens
 
-        if cache is not None:
+        if cache is not None and hasattr(cache, "memory_report"):
             cache_reports.append(cache.memory_report())
 
         prev_end = end_loc
@@ -231,7 +261,12 @@ def evaluate_backend(model, input_ids: torch.Tensor, args, backend: str) -> PPLR
     compressed = [r["n_compressed_blocks"] for r in cache_reports]
     fp16 = [r["n_fp16_blocks"] for r in cache_reports]
 
-    return PPLResult(
+    bit_histogram: dict[str, int] = {}
+    for report in cache_reports:
+        for key, count in (report.get("bit_histogram") or {}).items():
+            bit_histogram[key] = bit_histogram.get(key, 0) + int(count)
+
+    result = PPLResult(
         backend=backend,
         model=args.model,
         tokens=n_loss_tokens,
@@ -245,7 +280,11 @@ def evaluate_backend(model, input_ids: torch.Tensor, args, backend: str) -> PPLR
         config={
             "seq_len": args.seq_len,
             "stride": args.stride,
-            "policy": args.policy,
+            "policy": (
+                "v2_paper"
+                if backend == "v2_paper"
+                else ("v3_flat" if backend == "v3_flat" else args.policy)
+            ),
             "block_size": args.block_size,
             "sink": args.sink,
             "window": args.window,
@@ -266,8 +305,31 @@ def evaluate_backend(model, input_ids: torch.Tensor, args, backend: str) -> PPLR
             "key_group_size": args.key_group_size,
             "value_group_size": args.value_group_size,
             "max_cached_decompressed_blocks": args.max_cached_decompressed_blocks,
+            "residual_window": args.residual_window if backend == "v3_flat" else None,
+            "integration": (
+                "turboquant/V2PaperCache+CompressorV2(QJL)"
+                if backend == "v2_paper"
+                else (
+                    "turboquant/V3FlatCache+MSECompressor"
+                    if backend == "v3_flat"
+                    else "turboquant-pytorch/BlockKVCache"
+                )
+            ),
         },
     )
+    payload = attach_bpw_fields(
+        {
+            "backend": backend,
+            "avg_compression_ratio": result.avg_compression_ratio,
+            "bit_histogram": bit_histogram or None,
+            "config": result.config,
+        }
+    )
+    result.k_bpw = payload.get("k_bpw")
+    result.v_bpw = payload.get("v_bpw")
+    result.avg_bpw = payload.get("avg_bpw")
+    result.effective_bpw = payload.get("effective_bpw")
+    return result
 
 
 def main() -> None:
@@ -275,7 +337,16 @@ def main() -> None:
     parser.add_argument("--model", required=True)
     parser.add_argument(
         "--backend",
-        choices=["dynamic", "block_tq", "block_tq_mix", "block_skvq", "block_skvq_mix", "all"],
+        choices=[
+            "dynamic",
+            "block_tq",
+            "block_tq_mix",
+            "block_skvq",
+            "block_skvq_mix",
+            "v2_paper",
+            "v3_flat",
+            "all",
+        ],
         default="all",
     )
     parser.add_argument("--dataset", default="wikitext")
@@ -298,6 +369,12 @@ def main() -> None:
     parser.add_argument("--output", default=None)
 
     parser.add_argument("--policy", choices=["token", "window", "hybrid"], default="hybrid")
+    parser.add_argument(
+        "--residual-window",
+        type=int,
+        default=0,
+        help="TurboQuant V3 flat cache only: 0 = paper-style full-sequence quant, no fp16 tail",
+    )
     parser.add_argument("--block-size", type=int, default=16)
     parser.add_argument("--sink", type=int, default=16)
     parser.add_argument("--window", type=int, default=128)
@@ -367,6 +444,16 @@ def main() -> None:
                 f"avg_ratio={result.avg_compression_ratio:.3f} "
                 f"avg_compressed_blocks={result.avg_compressed_blocks:.1f} "
                 f"avg_fp16_blocks={result.avg_fp16_blocks:.1f}"
+            )
+        if result.avg_bpw is not None:
+            eff = (
+                f"{result.effective_bpw:.3f}"
+                if result.effective_bpw is not None
+                else "n/a"
+            )
+            print(
+                f"bpw K={result.k_bpw:.2f} V={result.v_bpw:.2f} "
+                f"avg={result.avg_bpw:.2f} effective={eff}"
             )
 
     if args.output:

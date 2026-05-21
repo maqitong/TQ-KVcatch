@@ -1,0 +1,476 @@
+backend,subset,sample_idx,score,compression_ratio,seconds,input_tokens,prediction
+block_tq_mix,narrativeqa,2,0.000000,4.819734345351043,478.0647,8192,
+block_tq_mix,narrativeqa,3,0.000000,4.819734345351043,474.9512,8192,
+block_tq_mix,narrativeqa,4,0.000000,4.819734345351043,470.0913,8192,
+block_tq_mix,narrativeqa,5,0.000000,4.819734345351043,452.8765,8192,
+block_tq_mix,narrativeqa,6,0.000000,4.819734345351043,453.6164,8192,
+block_tq_mix,narrativeqa,7,0.000000,4.819734345351043,451.5725,8192,
+block_tq_mix,narrativeqa,8,0.000000,4.819734345351043,453.9215,8192,
+block_tq_mix,narrativeqa,9,0.000000,4.819734345351043,460.0777,8192,
+block_tq_mix,narrativeqa,10,0.000000,4.819734345351043,450.0155,8192,
+block_tq_mix,narrativeqa,11,0.000000,4.819734345351043,451.4436,8192,
+block_tq_mix,narrativeqa,12,0.000000,4.819734345351043,451.4261,8192,
+block_tq_mix,narrativeqa,13,0.000000,4.819734345351043,452.4732,8192,
+block_tq_mix,narrativeqa,14,0.000000,4.819734345351043,452.8223,8192,
+block_tq_mix,narrativeqa,15,0.000000,4.819734345351043,451.2223,8192,
+block_tq_mix,qasper,16,0.064516,4.555009451795841,251.9759,4455,"the content of the content of the content of the content of fake content of fake content of fake content of fake content of fake content of fake content of news.
+In conclusion of fake news.
+Label of news.
+Label of news.
+Label of news.
+Label of the content of the content of the"
+block_tq_mix,qasper,17,0.352941,4.435121366496854,207.8095,3637,GhostVLAD is an extension of the NetVLAD approach proposed by Y. Zhang et al. in [10]. The main difference between NetVLAD and GhostVLAD is that GhostVLAD uses the ghost clusters instead of the NetVLAD clusters for the language identification
+block_tq_mix,qasper,18,0.000000,4.58933582787652,270.2537,4843,"spe
+spe
+spe
+
+
+ sierp
+
+
+
+
+ sierp nobody nobody"
+block_tq_mix,qasper,19,0.115385,4.398907981371447,193.3702,3361,"We propose the use of context tweets to improve the accuracy of abusive language detection.
+Question: What is the significance of character-level representations?
+Answer: Character-level representations do not improve the accuracy of neural network models.
+Question: What is the significance of using ensemble models?
+Answer:"
+block_tq_mix,qasper,20,0.000000,4.583978730782569,274.2372,4894,"4.
+.
+.
+.
+
+
+
+
+
+
+
+
+
+
+
+
+response
+
+
+contens"
+block_tq_mix,qasper,21,0.000000,4.7330115113256594,347.0628,6310,
+block_tq_mix,qasper,22,0.000000,4.711160964666293,346.0240,6237,
+block_tq_mix,qasper,23,0.000000,4.775300171526586,399.0058,7245,
+block_tq_mix,qasper,24,0.031250,4.446464072706617,220.0057,3851,"The proposed approach is different from other WSD approaches in that it uses a KL divergence measure to capture word similarity instead of a cosine similarity measure. This allows the model to capture polysemy and other linguistic phenomena that are not captured by cosine similarity.
+
+In conclusion, the proposed approach"
+block_tq_mix,qasper,25,0.000000,4.694294294294294,321.2888,5799,"as
+as.
+as as
+as.in as as as as as as as"
+block_tq_mix,qasper,26,0.000000,4.616892739085832,280.5126,5000,"push
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+sh Begriffe Begriffe Begriffe Begriffe"
+block_tq_mix,qasper,27,0.041667,4.4235727440147325,200.9044,3540,"The paper focuses on English.
+
+Question: What is the main goal of the paper?
+Answer: The main goal of the paper is to propose a method for text simplification using simplified corpora.
+
+Question: What is the difference between the proposed method and other methods?
+Answer: The proposed"
+block_tq_mix,qasper,28,0.120000,4.402401522916972,212.1755,3695,"The sentiment analysis dataset used is the IMDb dataset.
+
+Question: What is the optimal combination of hyperparameters for word2vec?
+Answer: The optimal combination of hyperparameters for word2vec is determined by the authors' experiments.
+
+Question: How does the size of the corpus affect the performance of"
+block_tq_mix,qasper,29,0.000000,4.819734345351043,452.4198,8192,
+block_tq_mix,qasper,30,0.000000,4.654733664006901,297.0890,5333,"3
+
+3 in the see, see, can 
+1 
+12121212121212121 and the and1 and1 and3 and3 and900 the 1-see the0002000"
+block_tq_mix,qasper,31,0.000000,4.819734345351043,451.3324,8192,
+block_tq_mix,multifieldqa_en,32,0.170213,3.830651151275068,23.6667,1871,"The most active fan club is the South West Ulartu Fan Club, which is composed of residents of the Malatia-Sebastia District of Yerevan.
+
+In addition to the club's stadium, the club has a training center located in the Malatia-Sebastia"
+block_tq_mix,multifieldqa_en,33,0.000000,4.819734345351043,449.6549,8192,
+block_tq_mix,multifieldqa_en,34,0.000000,4.819734345351043,450.4045,8192,
+block_tq_mix,multifieldqa_en,35,0.000000,4.819734345351043,448.6821,8192,
+block_tq_mix,multifieldqa_en,36,0.000000,4.819734345351043,453.2417,8192,
+block_tq_mix,multifieldqa_en,37,0.000000,4.819734345351043,454.0640,8192,
+block_tq_mix,multifieldqa_en,38,0.000000,4.819734345351043,452.8307,8192,
+block_tq_mix,multifieldqa_en,39,0.083333,4.3963636363636365,202.8031,3564,"Hugh H. Goodwin was a Vice Admiral in the United States Navy.
+
+Question: What was the name of the ship that Goodwin commanded during World War II?
+Answer: Goodwin commanded the USS Gambier Bay during World War II.
+
+Question: What was the name of the naval"
+block_tq_mix,multifieldqa_en,40,0.538462,4.112449799196787,57.3226,2284,The Buckeyes lost their first game of the season by a score of 3–4.
+block_tq_mix,multifieldqa_en,41,0.000000,4.819734345351043,450.8861,8192,
+block_tq_mix,multifieldqa_en,42,0.000000,4.819734345351043,450.6808,8192,
+block_tq_mix,multifieldqa_en,43,0.000000,4.819734345351043,452.2706,8192,
+block_tq_mix,multifieldqa_en,44,0.000000,4.819734345351043,451.3674,8192,
+block_tq_mix,multifieldqa_en,45,0.000000,4.819734345351043,452.4795,8192,
+block_tq_mix,multifieldqa_en,46,0.000000,4.819734345351043,453.2840,8192,
+block_tq_mix,multifieldqa_en,47,0.000000,4.394546912590217,191.4442,3362,"Born's first husband was Judge Henry Edgerton of the U.S. Court of Appeals for the District of Columbia Circuit.
+
+Question: What was Born's reason for resigning as chair of the CFTC?
+Answer: Born resigned as chair of the CFT"
+block_tq_pure,narrativeqa,0,0.000000,6.764314247669773,237.7656,8192,
+block_tq_pure,narrativeqa,1,0.000000,6.764314247669773,235.6387,8192,
+block_tq_pure,narrativeqa,2,0.000000,6.764314247669773,235.9248,8192,
+block_tq_pure,narrativeqa,3,0.000000,6.764314247669773,235.6922,8192,
+block_tq_pure,narrativeqa,4,0.000000,6.764314247669773,234.7700,8192,
+block_tq_pure,narrativeqa,5,0.000000,6.764314247669773,236.1378,8192,
+block_tq_pure,narrativeqa,6,0.000000,6.764314247669773,235.8681,8192,AK
+block_tq_pure,narrativeqa,7,0.000000,6.764314247669773,235.9478,8192,
+block_tq_pure,narrativeqa,8,0.000000,6.764314247669773,233.7957,8192,
+block_tq_pure,narrativeqa,9,0.000000,6.764314247669773,233.0824,8192,
+block_tq_pure,narrativeqa,10,0.000000,6.764314247669773,234.5355,8192,
+block_tq_pure,narrativeqa,11,0.000000,6.764314247669773,234.1450,8192,
+block_tq_pure,narrativeqa,12,0.000000,6.764314247669773,234.8763,8192,
+block_tq_pure,narrativeqa,13,0.000000,6.764314247669773,235.9725,8192,
+block_tq_pure,narrativeqa,14,0.000000,6.764314247669773,237.2894,8192,
+block_tq_pure,narrativeqa,15,0.000000,6.764314247669773,235.3278,8192,
+block_tq_pure,qasper,16,0.040816,6.307853403141361,126.7568,4455,"We found the question.
+We found the question.
+We found the question.
+
+
+We found the question.
+We found the question.
+We found the question.
+Question.
+We found the question.
+We found the question.
+We found the question.
+We found the question"
+block_tq_pure,qasper,17,0.444444,6.106870229007634,102.4726,3637,"GhostVLAD is an extension of the NetVLAD approach, which was proposed for place recognition. In GhostVLAD, they replace the hard assignment based clustering with soft assignment based clustering so that it can be trained with a neural network in an end-to-end fashion.
+
+Question"
+block_tq_pure,qasper,18,0.095238,6.361102106969206,137.7689,4843,"Љ.
+
+
+to themes.
+
+to.
+
+
+
+
+
+
+
+
+
+
+ese."
+block_tq_pure,qasper,19,0.123077,6.0521431727794965,95.0954,3361,The paper proposes the use of context tweets to improve the accuracy of abusive language detection. The authors suggest that using context tweets can provide additional information that can help improve the classification of abusive language. They also propose the use of a self-attention mechanism to better understand the context of a
+block_tq_pure,qasper,20,0.068966,6.35004003202562,138.7206,4894,"the.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+ 
+ 
+
+
+
+
+
+
+
+
+
+
+
+
+
+c
+
+c."
+block_tq_pure,qasper,21,0.000000,6.62646217832077,180.7768,6310,
+block_tq_pure,qasper,22,0.000000,6.575342465753424,179.3828,6237,
+block_tq_pure,qasper,23,0.000000,6.6923076923076925,207.3581,7245,
+block_tq_pure,qasper,24,0.093750,6.120406567630962,109.5650,3851,"The proposed approach captures word senses using KL divergence between Gaussian mixtures, which is a more robust and flexible approach than other WSD methods that rely solely on word embeddings. Unlike other methods that use a single vector to represent a word, the proposed approach models the distribution of word"
+block_tq_pure,qasper,25,0.000000,6.551550712489522,167.0400,5799,"Љ.Љ
+ЉЉЉЉЉЉЉЉЉЉЉЉЉ"
+block_tq_pure,qasper,26,0.000000,6.412919569347689,142.7441,5000,"prov.
+
+
+
+
+
+
+ and.
+
+
+ and Љes.
+spe,
+spe.
+spe.
+spe.
+spe.
+spe.
+spe.
+
+
+
+
+
+
+
+
+
+
+
+ac.
+to the."
+block_tq_pure,qasper,27,0.038462,6.084863837872071,99.3872,3540,"The paper focuses on the English language.
+
+Question: what is the main contribution of the paper?
+Answer: The main contribution of the paper is the proposal of a new method for text simplification using neural machine translation, which utilizes simplified corpora during training to improve the quality of the model. The"
+block_tq_pure,qasper,28,0.111111,6.03937324226597,104.9599,3695,"The sentiment analysis dataset used in this paper is the IMDb dataset.
+Question: What is the objective of this research?
+Answer: The objective of this research is to determine the optimal combinations of hyper-parameters for intrinsic and extrinsic evaluations of word embeddings.
+Question: What are the main find"
+block_tq_pure,qasper,29,0.000000,6.764314247669773,233.8744,8192,
+block_tq_pure,qasper,30,0.000000,6.49240487291322,153.5795,5333,"ac.
+question.
+in
+in
+in
+in ac.
+in in.
+spe.
+spe. con.
+pres.
+pres.
+question.
+d.
+of.
+of.
+question.
+
+
+
+d"
+block_tq_pure,qasper,31,0.000000,6.764314247669773,233.9175,8192,
+block_tq_pure,multifieldqa_en,32,0.526316,5.207443142660234,17.2338,1871,The most active fan club of Urartu is the South West Ultras fan club.
+block_tq_pure,multifieldqa_en,33,0.000000,6.764314247669773,235.1821,8192,
+block_tq_pure,multifieldqa_en,34,0.000000,6.764314247669773,234.2291,8192,
+block_tq_pure,multifieldqa_en,35,0.000000,6.764314247669773,233.1960,8192,
+block_tq_pure,multifieldqa_en,36,0.000000,6.764314247669773,234.6231,8192,
+block_tq_pure,multifieldqa_en,37,0.000000,6.764314247669773,233.4853,8192,
+block_skvq,narrativeqa,0,0.000000,5.324089003547243,8212.3040,8192,
+block_tq_pure,multifieldqa_en,38,0.000000,6.764314247669773,234.8032,8192,
+block_tq_pure,multifieldqa_en,39,0.285714,5.997905759162304,29.1822,3564,Hugh H. Goodwin was a Vice admiral in the United States Navy.
+block_tq_pure,multifieldqa_en,40,0.333333,5.357371328874673,21.5539,2284,The Buckeyes' record in their first game of the season was 1–0.
+block_tq_pure,multifieldqa_en,41,0.000000,6.764314247669773,234.2096,8192,
+block_tq_pure,multifieldqa_en,42,0.042553,6.764314247669773,233.2006,8192,ЉЉЉЉЉЉЉЉЉЉЉЉЉ.  pm  r  r  r  r  r 1 1 1 1  ly 。 。 1 1  r  pm  r  pm  pm 1  pm 1 ЉЉ
+block_tq_pure,multifieldqa_en,43,0.000000,6.764314247669773,233.5718,8192,
+block_tq_pure,multifieldqa_en,44,0.000000,6.764314247669773,235.4912,8192,
+block_tq_pure,multifieldqa_en,45,0.000000,6.764314247669773,235.5768,8192,
+block_tq_pure,multifieldqa_en,46,0.000000,6.764314247669773,235.5201,8192,
+block_tq_pure,multifieldqa_en,47,1.000000,5.958425475453339,13.4663,3362,Jacob C. Landau.
+block_skvq,narrativeqa,1,0.000000,5.324089003547243,8192.4776,8192,
+block_skvq,narrativeqa,2,0.000000,5.324089003547243,8196.1565,8192,
+skvq_native,narrativeqa,0,0.000000,,4.5099,4096,ed
+skvq_native,narrativeqa,1,0.000000,,4.0830,4096,
+skvq_native,narrativeqa,2,0.068966,,4.1306,4096,"ars,
+ And in the hollows of the dark,
+
+ 30.
+ All the witches and the gums of the quick.
+
+ 31.
+ And the quick reeludes of the quick."
+skvq_native,narrativeqa,3,0.156863,,4.0893,4096,"be at all, for the business of the many is not to be met, and the
+informalities of the business of the many, which are the reasons of the
+informal, and the business of the law, which is the"
+skvq_native,narrativeqa,4,0.036364,,4.0894,4096,"to the table, and the poor young men were at the
+table, and the poor young men were at the table, and the poor young men were
+at the table, and the poor young men were at the table, and the poor
+young men, the poor, the poor, the poor, the"
+skvq_native,narrativeqa,5,0.000000,,4.1017,4096,"""It is a great thing, Mr. Holmes, that you have been there.  It is a
+great thing, and I am afraid to be there.  I will not be
+great at the doctor, as the"
+skvq_native,narrativeqa,6,0.222222,,4.0951,4096,the bend of the
+skvq_native,narrativeqa,7,0.000000,,4.0975,4096,little bit of the
+skvq_native,narrativeqa,8,0.000000,,4.1132,4096,ed.  I was
+skvq_native,narrativeqa,9,0.071429,,4.1137,4096,"ars,
+ And in the hollows of the dark,
+
+ 30.
+ All the witches and the gums of the quick.
+
+ 31.
+ And the quick reeludes of the quick."
+skvq_native,narrativeqa,10,0.080000,,4.1637,4096,"the long
+bodies of the bark, and the bark of the bodies of the bark, and the"
+skvq_native,narrativeqa,11,0.050000,,4.1071,4096,".""  I was
+going to say that I had written a book.  I had written a book.  I
+wrote to say that I had written a book.  I wrote to say that he was an
+omely-h"
+skvq_native,narrativeqa,12,0.000000,,4.0319,4096,".
+
+""'Monsieur, I say, what was the reason of the room?
+
+""'Well, sir, I say, ""What was the reason of the room?
+
+""'Well, sir, with the chill be an old, with the reason, the chill of the"
+skvq_native,narrativeqa,13,0.000000,,4.0501,4096,"cs, a fine, a great, a poor man, a
+fine, a poor man, a poor man, a poor man, a poor man, a poor man, a poor
+man, a poor man, a poor man, a poor man, a poor man's hand, a poor man"
+skvq_native,narrativeqa,14,0.000000,,4.0440,4096,"cs, a fine, a great, a poor man, a
+fine, a poor man, a poor man, a poor man, a poor man, a poor man, a poor
+man, a poor man, a poor man, a poor man, a poor man's hand, a poor man"
+skvq_native,narrativeqa,15,0.142857,,4.0799,4096,little bit of the
+skvq_native,qasper,16,0.122449,,4.0452,4096,"In conclusion, we believe that the number of fake news is more than 177 viral content, and that the number of fake news is more than 177.
+In conclusion, we provide a viral question, we provide a viral to the question."
+skvq_native,qasper,17,0.064516,,3.7945,3637,"The GhostVLAD approach is a new approach to language identification. It is a new approach to language identification, and it is the best approach to language identification. It is the best approach to language identification, and it is the best approach to language identification.
+
+Conclusion:
+In this work, we have"
+skvq_native,qasper,18,0.178571,,4.0816,4096,"-1, and the M-DRE model outperforms the previous best-performing model, 10-5.
+In conclusion, the ARE model is the best-prediction of the ARE model, and the M-prediction of the ARE model, and the text-R"
+skvq_native,qasper,19,0.065574,,3.6004,3361,"The use of character-level features in the context of a neural network model has the most significant positive impact on the accuracy of the target.
+
+Conclusion:
+We conclude that the use of character-level features in the context of a neural network model has the most significant positive impact on the accuracy of the target"
+skvq_native,qasper,20,0.049383,,4.0505,4096,"to be closer to the Facebook News, and the other two Facebook pages for the News, and the other two Facebook pages for the News, and the other two Facebook pages for the News, and the other two Facebook pages for the News, and the News, and the News, and the News, and the News,"
+skvq_native,qasper,21,0.000000,,4.0150,4096,"ABREF13 show the results of the Word Breaker and the BIBREF16 word.
+In this section, we present the results of the Word Breaker and the BIBREF16 of the INLINEFORM000001 of the word and INLINE00000"
+skvq_native,qasper,22,0.000000,,4.0492,4096,"off for the unsuitable extraction of the first 100% of the unsuitable extraction of the first 1000.
+We found that the automatic extraction, as a question, the question, and the question."
+skvq_native,qasper,23,0.108108,,4.0605,4096,"BIBREF27). We also used the following:
+
+1. Experimental Setup ::::
+
+In this section, we describe the following:
+
+1. Experimental Setup
+
+
+2."
+skvq_native,qasper,24,0.218182,,3.9326,3851,"The proposed approach of GM$ $\_$KL is better than the other approaches on the word similarity and entailment datasets.
+
+Question: How does the proposed approach of GM$ $\_$KL compare to the other approaches on the word similarity and entailment datasets?
+Answer:"
+skvq_native,qasper,25,0.067797,,4.0445,4096,".
+The question is then the final answer.
+The final answer is the final answer.
+The final answer is the final answer.
+The final answer is the final answer.
+The final answer is the final answer.
+The final answer is the final answer.
+The final answer is the final answer is"
+skvq_native,qasper,26,0.000000,,4.0434,4096,"(R), and Emotion (E) in the classification of the model. The model is based on the weighted balanced and the model is applied in the first step of the first step and the second step is shown in the second step
+In this and the main and the Emotion
+In this is the"
+skvq_native,qasper,27,0.000000,,3.6444,3540,"This paper focuses on the size of the word, which is the size of the word, and the size of the word is also shown in the paper. The results of the paper are also shown in the paper.
+
+In conclusion, our method is effective in the paper, which is also effective in the paper"
+skvq_native,qasper,28,0.000000,,3.8389,3695,"The word vectors are used for the downstream task.
+Question: What is the relationship between the word vectors and the word vectors?
+Answer: The word vectors are used for the downstream task.
+Question: What is the relationship between the word vectors and the word vectors?
+Answer: The word vectors are"
+skvq_native,qasper,29,0.115385,,4.0501,4096,"-LSTM} \text{Bi-LSTM} \text{Bi-LSTM} \text{Bi-LSTM} \text{Bi-LSTM} \text{Bi-LSTM;
+
+In the following, we apply the following the input to the"
+skvq_native,qasper,30,0.000000,,4.0604,4096,"regressing the EEG data.
+
+In conclusion, the pre-processing of the EEG data was available in the pre-processing of the EEG data, and the EEG data was available in the EEG data. The EEG data was available in the pre-processing of the EEG"
+skvq_native,qasper,31,0.051948,,4.0652,4096,"bots are often determined to be the most suitable for the creation of the first social and the name of the next social.
+In the case of the first study, the social and the name of the name of the name of the name of the name of the name of the name of the name of the name of"
+skvq_native,multifieldqa_en,32,0.170213,,2.7739,1871,"The most active fan club is the South West Ultras.
+
+Question: What is the name of the club's academy?
+Answer: The club's academy is called the Banants Training Centre.
+
+Question: How many full-sized training pitches does the club have?"
+skvq_native,multifieldqa_en,33,0.000000,,4.1220,4096,"isolated from the human genome, and 100 μM of the human genome was isolated from the human genome, and 100 μM of the human genome was isolated from the human genes, and 100001.
+In 100"
+skvq_native,multifieldqa_en,34,0.000000,,4.1188,4096,"-1 is shifted to the left side of the dot. In the case of SWNT I, the lower band of the black box is the lower box. In the case of SWNT I, the lower box in the lower box in the lower box in the Science in the Science in the Science in"
+skvq_native,multifieldqa_en,35,0.066667,,4.0881,4096,"the right atrium.
+Catheter – A catheter is a small tube that is inserted into the heart through the blood vessels and the right atrium.
+Catheter – A small tube that is inserted in the right atrial pressure in the right atrial pressure in the heart."
+skvq_native,multifieldqa_en,36,0.156250,,4.1128,4096,"parks were made to be a fair, and the first flight was made to a reel. The first flight was made to a reel, and the second flight was made to a reel. The first flight was made to a reel to a 1.012 12 12"
+skvq_native,multifieldqa_en,37,0.000000,,4.1273,4096,"$.
+
+\section{Conclusion}
+
+\section{Model}
+\section{Secs}
+\section{M}
+\section{Secs}
+\section{Sec}
+\section{Sec}
+\section{Secs}
+\section{analysis}
+
+\"
+skvq_native,multifieldqa_en,38,0.065574,,4.1489,4096,"as 1000.
+The most important discovery of the Faraday cage is a question of the force of the electric field, which is a question of the force of the electric field, a question of the force of the question of the force of the electricity and the force of the Farad"
+skvq_native,multifieldqa_en,39,0.000000,,3.7532,3564,"He was a member of the General Staff, Navy Department, and was a member of the General Staff, Navy Department, and was a member of the General Staff, Navy Department, and was a member of the General Staff, Navy Department, and was a member of the General Staff, Navy Department, and was a member"
+skvq_native,multifieldqa_en,40,0.115385,,2.9599,2284,"The Ohio State Buckeyes lost to Northwestern, 10-9.
+
+Question: What was the final score of the Western Michigan game?
+Answer: The final score of the Western Michigan game was 13-2.
+
+Question: What was the final score of the Varsity"
+skvq_native,multifieldqa_en,41,0.052632,,4.1091,4096,"menaquinone (MK-4) and the fats of the menaquinone (MK-4) and the fats of the menaquinone (MK-4, MK-4, and the fats, and the fats of the fats and the fats"
+skvq_native,multifieldqa_en,42,0.090909,,4.1378,4096,"lectronic devices are represented by the present, which is stable and low-level .
+
+The present has been isolated in the indenofluorences, which is represented by the bench-interview, which is a non-in-electronic force.
+
+The present has been isolated"
+skvq_native,multifieldqa_en,43,0.000000,,4.1231,4096,"lost his behavior.
+I'm so sorry to see him.
+I'm so sorry to see him.
+I'm so sorry to see him.
+I'm so sorry to see the question of how to see the question.
+I'm so I'm so I'm so"
+skvq_native,multifieldqa_en,44,0.047619,,4.1164,4096,"menaquinone (MK-4) and the fats of the menaquinone (MK-4) and the fats of the menaquinone (MK-4, MK-4, and the fats, and the fats of the fats and the fats"
+skvq_native,multifieldqa_en,45,0.000000,,4.0484,4096,"as 1000.
+The most important discovery of the Faraday cage is a question of the force of the electric field, which is a question of the force of the electric field, a question of the force of the question of the force of the electricity and the force of the Farad"
+skvq_native,multifieldqa_en,46,0.000000,,4.0476,4096,"ktop and laptop hardware are better than the R&D.
+Money and momentum, the x86 market is a huge money maker for the x86 market is a huge maker for the question is that the question is that means that means that means that means.
+Question:
+Question:"
+skvq_native,multifieldqa_en,47,0.000000,,3.5243,3362,"Born in 1999, Brooksley Born was a financial crisis in 2009.
+
+Profile: Brooksley Born, Chairperson of the CFTC, Chairman of the Clinton Administration, and the Clinton Administration's Profiles in Courage Award."

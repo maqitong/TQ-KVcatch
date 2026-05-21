@@ -1,0 +1,12 @@
+method,backend,ppl,k_bpw,v_bpw,avg_bpw,effective_bpw,compression_ratio,mixed,high_key_bits,low_key_bits,high_value_bits,low_value_bits,important_ratio
+FP16,dynamic,6.802179585361626,16.0,16.0,16.0,16.0,,,4,2,4,2,0.3
+SKVQ skvq_baseline (native),skvq_native,7.681895,2.0,2.0,2.0,,,,,,,,
+TurboQuant V2 paper (QJL),v2_paper,53.10321906239801,2.0,2.0,2.0,2.1875,14.62857142857143,,4,2,4,2,0.3
+TurboQuant V3 flat (rw=0),v3_flat,7.993731697308574,2.0,2.0,2.0,4.25,7.529411764705883,,4,2,4,2,0.3
+TurboQuant pure (tq_replace),block_tq,7.913198408817881,2.0,2.0,2.0,7.8278,4.0879935397732785,,4,2,4,2,0.3
+TurboQuant TokenBlock,block_tq,18.885572876804943,2.0,2.0,2.0,5.0412,6.34769975786925,,4,2,4,2,0.3
+SKVQ TokenBlock,block_skvq,34.40520101947428,2.0,2.0,2.0,5.5406,5.775495822007451,,4,2,4,2,0.3
+Hybrid+TQ+Block,block_tq,12.906310540567883,2.0,2.0,2.0,8.9121,3.590640384330586,,4,2,4,2,0.3
+Hybrid+TQ+Block+PageMix,block_tq_mix,9.775218349964996,2.6,2.6,2.6,9.9026,3.231471150163839,True,4,2,4,2,0.3
+Hybrid+SKVQ+Block,block_skvq,24.38320176448152,2.0,2.0,2.0,9.3402,3.4260555734879583,,4,2,4,2,0.3
+Hybrid+SKVQ+Block+PageMix,block_skvq_mix,15.093457072059973,2.6,2.6,2.6,10.3306,3.0975995324728873,True,4,2,4,2,0.3

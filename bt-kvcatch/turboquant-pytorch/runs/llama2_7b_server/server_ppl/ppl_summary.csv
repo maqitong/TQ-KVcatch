@@ -1,0 +1,12 @@
+method,backend,policy,ppl,k_bpw,v_bpw,avg_bpw,effective_bpw,compression_ratio,loss,tokens,protected_layers,reorder,mixed,sink,window,integration,seconds
+FP16,dynamic,"hybrid,sink=16,win=128",6.8022,16.0000,16.0000,16.0000,16.0000,,1.9172,3961,1,,False,16,128,eval_ppl/BlockKVCache,1.1
+SKVQ skvq_baseline (native),skvq_native,"window=128,sink=5",7.6819,2.0000,2.0000,2.0000,,,,,0,True,,5,128,SKVQ/ModelKVCacheManager,57.8
+TurboQuant V2 paper (QJL),v2_paper,"v2_paper,no_residual_window",53.1032,2.0000,2.0000,2.0000,2.1875,14.629,3.9722,3961,0,,False,16,128,turboquant/V2PaperCache+CompressorV2(QJL),5.0
+TurboQuant V3 flat (rw=0),v3_flat,"v3_flat,rw=0",7.9937,2.0000,2.0000,2.0000,4.2500,7.529,2.0787,3961,0,,False,16,128,turboquant/V3FlatCache+MSECompressor,7.8
+TurboQuant pure (tq_replace),block_tq,"hybrid,sink=5,win=128",7.9132,2.0000,2.0000,2.0000,7.8278,4.088,2.0685,3961,0,False,False,5,128,turboquant-pytorch/BlockKVCache,15.1
+TurboQuant TokenBlock,block_tq,token,18.8856,2.0000,2.0000,2.0000,5.0412,6.348,2.9384,3961,1,,False,16,128,eval_ppl/BlockKVCache,76.8
+SKVQ TokenBlock,block_skvq,token,34.4052,2.0000,2.0000,2.0000,5.5406,5.775,3.5382,3961,1,,False,16,128,eval_ppl/BlockKVCache,349.5
+Hybrid+TQ+Block,block_tq,"hybrid,sink=16,win=128",12.9063,2.0000,2.0000,2.0000,8.9121,3.591,2.5577,3961,1,,False,16,128,eval_ppl/BlockKVCache,75.0
+Hybrid+TQ+Block+PageMix,block_tq_mix,"hybrid,sink=16,win=128",9.7752,2.6000,2.6000,2.6000,9.9026,3.231,2.2799,3961,1,,True,16,128,eval_ppl/BlockKVCache,137.3
+Hybrid+SKVQ+Block,block_skvq,"hybrid,sink=16,win=128",24.3832,2.0000,2.0000,2.0000,9.3402,3.426,3.1939,3961,1,,False,16,128,eval_ppl/BlockKVCache,321.1
+Hybrid+SKVQ+Block+PageMix,block_skvq_mix,"hybrid,sink=16,win=128",15.0935,2.6000,2.6000,2.6000,10.3306,3.098,2.7143,3961,1,,True,16,128,eval_ppl/BlockKVCache,329.3

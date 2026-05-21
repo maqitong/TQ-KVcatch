@@ -1,0 +1,42 @@
+# Conda 环境：SKVQ + bt-kvcatch/turboquant-pytorch
+# 创建：conda env create -f environment.yml
+# 激活：conda activate btkvcatch
+# 之后安装本地包（见下方「安装本地扩展」）
+name: btkvcatch
+channels:
+  - pytorch
+  - nvidia
+  - conda-forge
+dependencies:
+  - python=3.10
+  - pip
+  - ninja
+  - pytorch>=2.2
+  - pytorch-cuda=12.4
+  - pip:
+    # 与 SKVQ 自定义 modeling_llama_skvq 对齐；5.x 易出现 rope_theta / FX API 差异
+    - transformers==4.57.6
+    - sentencepiece
+    - protobuf
+    - accelerate>=0.25.0
+    - datasets
+    - tqdm
+    - scipy>=1.10.0
+    - scikit-learn
+    - numpy
+    - six
+    - rouge
+    - jieba
+    - fuzzywuzzy
+    - python-Levenshtein
+    - fschat
+    - bitsandbytes>=0.43.0
+
+# --- 创建环境后在本目录执行（仅需一次）---
+# conda activate btkvcatch
+# pip install -e bt-kvcatch/turboquant-pytorch
+# pip install -e SKVQ/kernels --no-build-isolation
+# （CUDA 扩展构建需要当前环境里的 torch，故加 --no-build-isolation）
+#
+# 跑 Exp1 / WikiText：若 HuggingFace 慢，可 export HF_ENDPOINT=https://hf-mirror.com
+# C4：可将数据放在本地目录（如 /root/autodl-tmp/c4），并 export C4_LOCAL_DIR=... 或传 --c4-local-dir

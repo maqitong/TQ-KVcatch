@@ -94,8 +94,16 @@ def _model_input_device(model) -> torch.device:
 
 def _selected_backends(name: str) -> list[str]:
     if name == "all":
-        return ["dynamic", "block_tq", "block_tq_mix", "block_skvq", "block_skvq_mix"]
-    return [name]
+        return [
+            "dynamic",
+            "block_tq",
+            "block_tq_mix",
+            "block_skvq",
+            "block_skvq_mix",
+            "block_tq_pure",
+            "skvq_native",
+        ]
+    return _parse_csv(name) if "," in name else [name]
 
 
 def _build_policy(args):
@@ -108,22 +116,102 @@ def _build_policy(args):
     raise ValueError(f"unknown policy: {args.policy}")
 
 
+def _paper_tq_pure_policy():
+    from turboquant.block_cache.skvq_native_integration import PAPER_SINK, PAPER_WINDOW
+
+    return HybridPolicy(sink_size=PAPER_SINK, window_size=PAPER_WINDOW)
+
+
+def _backend_config(args, backend: str) -> dict:
+    if backend == "block_tq_pure":
+        from turboquant.block_cache.skvq_native_integration import (
+            PAPER_CLIP,
+            PAPER_SINK,
+            PAPER_WINDOW,
+        )
+
+        return {
+            "policy": "hybrid",
+            "block_size": args.block_size,
+            "sink": PAPER_SINK,
+            "window": PAPER_WINDOW,
+            "key_bits": args.key_bits,
+            "value_bits": args.value_bits,
+            "mixed": False,
+            "paper_baseline": "tq_pure",
+            "reorder": False,
+            "protected_layers": 0,
+            "clipping": PAPER_CLIP,
+            "integration": "turboquant-pytorch/BlockKVCache",
+        }
+    if backend == "skvq_native":
+        from turboquant.block_cache.skvq_native_integration import skvq_native_config
+
+        return skvq_native_config(
+            key_bits=args.key_bits,
+            value_bits=args.value_bits,
+            reorder_file=args.reorder_file,
+        )
+    return {
+        "policy": args.policy,
+        "block_size": args.block_size,
+        "sink": args.sink,
+        "window": args.window,
+        "key_bits": args.key_bits,
+        "value_bits": args.value_bits,
+        "mixed": backend.endswith("_mix"),
+        "importance_metric": args.importance_metric,
+        "important_ratio": args.important_ratio,
+        "high_key_bits": args.high_key_bits,
+        "high_value_bits": args.high_value_bits,
+        "low_key_bits": args.low_key_bits,
+        "low_value_bits": args.low_value_bits,
+        "num_layers": args.num_layers,
+        "protected_layers": args.protected_layers,
+        "protected_key_bits": args.protected_key_bits,
+        "protected_value_bits": args.protected_value_bits,
+        "group_size": args.group_size,
+        "key_group_size": args.key_group_size,
+        "value_group_size": args.value_group_size,
+        "max_cached_decompressed_blocks": args.max_cached_decompressed_blocks,
+    }
+
+
 def _cache_factory(args, backend: str) -> Callable[[], BlockKVCache | None]:
-    if backend == "dynamic":
+    if backend in {"dynamic", "skvq_native"}:
         return lambda: None
-    if backend not in {"block_tq", "block_tq_mix", "block_skvq", "block_skvq_mix"}:
+    if backend not in {
+        "block_tq",
+        "block_tq_mix",
+        "block_skvq",
+        "block_skvq_mix",
+        "block_tq_pure",
+    }:
         raise ValueError(f"unknown backend: {backend}")
 
     quant_backend = "skvq" if "skvq" in backend else "turboquant"
     mixed = backend.endswith("_mix")
 
     def make_cache() -> BlockKVCache:
+        if backend == "block_tq_pure":
+            from turboquant.block_cache.skvq_native_integration import PAPER_CLIP
+
+            policy = _paper_tq_pure_policy()
+            reorder_file = None
+            protected_layers = 0
+            clipping = PAPER_CLIP
+        else:
+            policy = _build_policy(args)
+            reorder_file = args.reorder_file
+            protected_layers = args.protected_layers
+            clipping = args.clipping
+
         cfg = BlockCacheConfig(
             block_size=args.block_size,
             key_bits=args.key_bits,
             value_bits=args.value_bits,
             granularity=args.granularity,
-            policy=_build_policy(args),
+            policy=policy,
             quant_backend=quant_backend,
             mixed_precision=mixed,
             importance_metric=args.importance_metric,
@@ -133,14 +221,14 @@ def _cache_factory(args, backend: str) -> Callable[[], BlockKVCache | None]:
             low_key_bits=args.low_key_bits,
             low_value_bits=args.low_value_bits,
             num_layers=args.num_layers,
-            protected_layers=args.protected_layers,
+            protected_layers=protected_layers,
             protected_key_bits=args.protected_key_bits,
             protected_value_bits=args.protected_value_bits,
             group_size=args.group_size,
             key_group_size=args.key_group_size,
             value_group_size=args.value_group_size,
-            clipping=args.clipping,
-            reorder_file=args.reorder_file,
+            clipping=clipping,
+            reorder_file=reorder_file,
             max_cached_decompressed_blocks=args.max_cached_decompressed_blocks,
         )
         return BlockKVCache(cfg)
@@ -315,30 +403,150 @@ def run_example(model, tokenizer, args, backend: str, example: LongBenchExample,
         n_fp16_blocks=report["n_fp16_blocks"] if report else None,
         bit_histogram=report["bit_histogram"] if report else None,
         precision_histogram=report["precision_histogram"] if report else None,
-        config={
-            "policy": args.policy,
-            "block_size": args.block_size,
-            "sink": args.sink,
-            "window": args.window,
-            "key_bits": args.key_bits,
-            "value_bits": args.value_bits,
-            "mixed": backend.endswith("_mix"),
-            "importance_metric": args.importance_metric,
-            "important_ratio": args.important_ratio,
-            "high_key_bits": args.high_key_bits,
-            "high_value_bits": args.high_value_bits,
-            "low_key_bits": args.low_key_bits,
-            "low_value_bits": args.low_value_bits,
-            "num_layers": args.num_layers,
-            "protected_layers": args.protected_layers,
-            "protected_key_bits": args.protected_key_bits,
-            "protected_value_bits": args.protected_value_bits,
-            "group_size": args.group_size,
-            "key_group_size": args.key_group_size,
-            "value_group_size": args.value_group_size,
-            "max_cached_decompressed_blocks": args.max_cached_decompressed_blocks,
-        },
+        config=_backend_config(args, backend),
     )
+
+
+@torch.no_grad()
+def run_example_skvq_native(
+    model,
+    tokenizer,
+    args,
+    example: LongBenchExample,
+    sample_idx: int,
+) -> LongBenchResult:
+    from turboquant.block_cache.skvq_native_integration import (
+        build_skvq_baseline_manager,
+        clear_quantizer,
+        detach_quantizer,
+        plug_quantizer,
+    )
+
+    if args.reorder_file is None:
+        raise ValueError("skvq_native requires --reorder-file")
+
+    import gc
+
+    skvq_budget = getattr(args, "skvq_max_input_tokens", None) or args.max_input_tokens
+    prompt = build_prompt(example)
+    device = _model_input_device(model)
+    inputs = tokenizer(
+        prompt,
+        return_tensors="pt",
+        truncation=True,
+        max_length=skvq_budget,
+    ).to(device)
+    if not args.pass_attention_mask:
+        inputs.pop("attention_mask", None)
+
+    config = _backend_config(args, "skvq_native")
+    config["max_input_tokens"] = skvq_budget
+
+    detach_quantizer(model)
+    manager = build_skvq_baseline_manager(
+        model,
+        reorder_file=args.reorder_file,
+        key_bits=args.key_bits,
+        value_bits=args.value_bits,
+        group_size=args.group_size,
+        skvq_root=args.skvq_root,
+    )
+    plug_quantizer(model, manager)
+
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+
+    from turboquant.block_cache.skvq_native_integration import skvq_native_generate
+
+    started = time.perf_counter()
+    oom = False
+    error_msg = ""
+    try:
+        sequences = skvq_native_generate(
+            model,
+            tokenizer,
+            inputs,
+            max_new_tokens=args.max_new_tokens,
+        )
+        new_tokens = sequences[0, inputs.input_ids.shape[1] :]
+        prediction = tokenizer.decode(new_tokens, skip_special_tokens=True).strip()
+        score = score_prediction(prediction, example.answers)
+        output_tokens = int(new_tokens.shape[0])
+    except torch.cuda.OutOfMemoryError as exc:
+        oom = True
+        error_msg = str(exc).splitlines()[0][:500]
+        prediction = ""
+        score = 0.0
+        output_tokens = 0
+    finally:
+        seconds = time.perf_counter() - started
+        clear_quantizer(model)
+        detach_quantizer(model)
+        gc.collect()
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+
+    if oom:
+        config["status"] = "oom"
+        config["error"] = error_msg
+
+    return LongBenchResult(
+        backend="skvq_native",
+        model=args.model,
+        subset=example.subset,
+        sample_idx=sample_idx,
+        score=score,
+        prediction=prediction,
+        answers=example.answers,
+        input_tokens=int(inputs.input_ids.shape[1]),
+        output_tokens=output_tokens,
+        seconds=seconds,
+        compression_ratio=None,
+        n_compressed_blocks=None,
+        n_fp16_blocks=None,
+        bit_histogram=None,
+        precision_histogram=None,
+        config=config,
+    )
+
+
+def _run_key(backend: str, subset: str, sample_idx: int) -> str:
+    return f"{backend}|{subset}|{sample_idx}"
+
+
+def _parse_resume_log(log_path: Path) -> set[str]:
+    """Parse `=== backend=... subset=... sample=N ===` lines from a log file."""
+    pattern = re.compile(
+        r"^=== backend=(\S+) subset=(\S+) sample=(\d+) ===$"
+    )
+    completed: set[str] = set()
+    for line in log_path.read_text(encoding="utf-8", errors="replace").splitlines():
+        m = pattern.match(line.strip())
+        if m:
+            completed.add(_run_key(m.group(1), m.group(2), int(m.group(3))))
+    return completed
+
+
+def _load_results_jsonl(jsonl_path: Path) -> tuple[list[LongBenchResult], set[str]]:
+    results: list[LongBenchResult] = []
+    completed: set[str] = set()
+    if not jsonl_path.exists():
+        return results, completed
+    for line in jsonl_path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        row = json.loads(line)
+        result = LongBenchResult(**row)
+        results.append(result)
+        completed.add(_run_key(result.backend, result.subset, result.sample_idx))
+    return results, completed
+
+
+def _append_result_jsonl(jsonl_path: Path, result: LongBenchResult) -> None:
+    jsonl_path.parent.mkdir(parents=True, exist_ok=True)
+    with jsonl_path.open("a", encoding="utf-8") as f:
+        f.write(json.dumps(asdict(result), ensure_ascii=False) + "\n")
 
 
 def _write_outputs(results: list[LongBenchResult], output_dir: Path) -> None:
@@ -411,9 +619,13 @@ def main() -> None:
     parser.add_argument("--model", required=True)
     parser.add_argument(
         "--backend",
-        choices=["dynamic", "block_tq", "block_tq_mix", "block_skvq", "block_skvq_mix", "all"],
         default="all",
+        help=(
+            "Backend name, comma-separated list, or 'all' "
+            "(includes block_tq_pure and skvq_native paper baselines)"
+        ),
     )
+    parser.add_argument("--skvq-root", default=None, help="Path to SKVQ repo for skvq_native backend")
     parser.add_argument("--dataset", default="THUDM/LongBench")
     parser.add_argument("--subsets", default="narrativeqa,qasper,multifieldqa_en")
     parser.add_argument("--split", default="test")
@@ -421,6 +633,12 @@ def main() -> None:
     parser.add_argument("--input-jsonl", default=None)
     parser.add_argument("--toy-sample", action="store_true")
     parser.add_argument("--max-input-tokens", type=int, default=8192)
+    parser.add_argument(
+        "--skvq-max-input-tokens",
+        type=int,
+        default=4096,
+        help="Input token budget for skvq_native backend (eager attn; 8192 often OOM on 24GB)",
+    )
     parser.add_argument("--max-new-tokens", type=int, default=64)
     parser.add_argument("--dtype", choices=["auto", "float16", "bfloat16", "float32"], default="auto")
     parser.add_argument("--device-map", default="auto")
@@ -430,6 +648,16 @@ def main() -> None:
     parser.add_argument("--pass-attention-mask", action="store_true")
     parser.add_argument("--record-attentions", action="store_true")
     parser.add_argument("--output-dir", default=None)
+    parser.add_argument(
+        "--resume-log",
+        default=None,
+        help="Skip (backend, subset, sample) already present in this log file",
+    )
+    parser.add_argument(
+        "--append-results",
+        action="store_true",
+        help="Load existing output-dir/longbench_results.jsonl and append new rows",
+    )
 
     parser.add_argument("--policy", choices=["token", "window", "hybrid"], default="hybrid")
     parser.add_argument("--block-size", type=int, default=16)
@@ -490,12 +718,39 @@ def main() -> None:
     if args.num_layers is None:
         args.num_layers = getattr(model.config, "num_hidden_layers", None)
 
+    output_dir = Path(args.output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    jsonl_path = output_dir / "longbench_results.jsonl"
+
     results: list[LongBenchResult] = []
-    for backend in _selected_backends(args.backend):
+    completed: set[str] = set()
+    if args.append_results:
+        results, completed = _load_results_jsonl(jsonl_path)
+        print(f"[resume] loaded {len(results)} rows from {jsonl_path}")
+    if args.resume_log:
+        from_log = _parse_resume_log(Path(args.resume_log))
+        completed |= from_log
+        print(f"[resume] {len(from_log)} completed keys from log {args.resume_log}")
+
+    skipped = 0
+    backends = _selected_backends(args.backend)
+    hf_backends = [b for b in backends if b != "skvq_native"]
+
+    for backend in hf_backends:
         for sample_idx, example in enumerate(examples):
+            key = _run_key(backend, example.subset, sample_idx)
+            if key in completed:
+                skipped += 1
+                print(
+                    f"\n=== backend={backend} subset={example.subset} "
+                    f"sample={sample_idx} === [skip resume]"
+                )
+                continue
             print(f"\n=== backend={backend} subset={example.subset} sample={sample_idx} ===")
             result = run_example(model, tokenizer, args, backend, example, sample_idx)
             results.append(result)
+            completed.add(key)
+            _append_result_jsonl(jsonl_path, result)
             ratio = (
                 f"{result.compression_ratio:.3f}x"
                 if result.compression_ratio is not None
@@ -507,7 +762,53 @@ def main() -> None:
             )
             print(f"prediction={result.prediction[:240]!r}")
 
-    _write_outputs(results, Path(args.output_dir))
+    if "skvq_native" in backends:
+        import gc
+
+        from turboquant.block_cache.skvq_native_integration import load_skvq_llama
+
+        del model
+        gc.collect()
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+
+        print("\n=== Loading SKVQ native Llama model ===")
+        skvq_model, skvq_tokenizer = load_skvq_llama(
+            args.model,
+            skvq_root=args.skvq_root,
+            dtype=_dtype_from_name(args.dtype),
+            device_map=args.device_map,
+            local_files_only=args.local_files_only,
+            trust_remote_code=args.trust_remote_code,
+        )
+        for sample_idx, example in enumerate(examples):
+            key = _run_key("skvq_native", example.subset, sample_idx)
+            if key in completed:
+                skipped += 1
+                print(
+                    f"\n=== backend=skvq_native subset={example.subset} "
+                    f"sample={sample_idx} === [skip resume]"
+                )
+                continue
+            print(f"\n=== backend=skvq_native subset={example.subset} sample={sample_idx} ===")
+            result = run_example_skvq_native(
+                skvq_model, skvq_tokenizer, args, example, sample_idx
+            )
+            results.append(result)
+            completed.add(key)
+            _append_result_jsonl(jsonl_path, result)
+            print(
+                f"score={result.score:.4f} tokens={result.input_tokens} "
+                f"seconds={result.seconds:.2f}"
+            )
+            print(f"prediction={result.prediction[:240]!r}")
+        del skvq_model
+        gc.collect()
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+
+    print(f"\n[resume] skipped {skipped} already-completed runs")
+    _write_outputs(results, output_dir)
 
 
 if __name__ == "__main__":
