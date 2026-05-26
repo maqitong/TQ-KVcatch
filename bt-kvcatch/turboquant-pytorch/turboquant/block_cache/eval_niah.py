@@ -27,12 +27,12 @@ from typing import Callable
 
 import torch
 
-from turboquant.block_cache import (
-    BlockCacheConfig,
-    BlockKVCache,
-    HybridPolicy,
-    TokenBlockPolicy,
-    WindowBlockPolicy,
+from turboquant.block_cache import BlockKVCache
+from turboquant.block_cache.methods import (
+    NIAH_ALL_BACKENDS,
+    build_policy as _shared_build_policy,
+    cache_factory_for_backend,
+    parse_backend_selection,
 )
 
 
@@ -99,59 +99,19 @@ def _model_input_device(model) -> torch.device:
 
 
 def _selected_backends(name: str) -> list[str]:
-    if name == "all":
-        return ["dynamic", "block_tq", "block_tq_mix", "block_skvq", "block_skvq_mix"]
-    return [name]
+    return parse_backend_selection(name, all_backends=NIAH_ALL_BACKENDS)
 
 
 def _build_policy(args):
-    if args.policy == "token":
-        return TokenBlockPolicy()
-    if args.policy == "window":
-        return WindowBlockPolicy(window_size=args.window)
-    if args.policy == "hybrid":
-        return HybridPolicy(sink_size=args.sink, window_size=args.window)
-    raise ValueError(f"unknown policy: {args.policy}")
+    return _shared_build_policy(args, window_uses_sink=False)
 
 
 def _cache_factory(args, backend: str) -> Callable[[], BlockKVCache | None]:
-    if backend == "dynamic":
-        return lambda: None
-    if backend not in {"block_tq", "block_tq_mix", "block_skvq", "block_skvq_mix"}:
-        raise ValueError(f"unknown backend: {backend}")
-
-    quant_backend = "skvq" if "skvq" in backend else "turboquant"
-    mixed = backend.endswith("_mix")
-
-    def make_cache() -> BlockKVCache:
-        cfg = BlockCacheConfig(
-            block_size=args.block_size,
-            key_bits=args.key_bits,
-            value_bits=args.value_bits,
-            granularity=args.granularity,
-            policy=_build_policy(args),
-            quant_backend=quant_backend,
-            mixed_precision=mixed,
-            importance_metric=args.importance_metric,
-            important_ratio=args.important_ratio,
-            high_key_bits=args.high_key_bits,
-            high_value_bits=args.high_value_bits,
-            low_key_bits=args.low_key_bits,
-            low_value_bits=args.low_value_bits,
-            num_layers=args.num_layers,
-            protected_layers=args.protected_layers,
-            protected_key_bits=args.protected_key_bits,
-            protected_value_bits=args.protected_value_bits,
-            group_size=args.group_size,
-            key_group_size=args.key_group_size,
-            value_group_size=args.value_group_size,
-            clipping=args.clipping,
-            reorder_file=args.reorder_file,
-            max_cached_decompressed_blocks=args.max_cached_decompressed_blocks,
-        )
-        return BlockKVCache(cfg)
-
-    return make_cache
+    return cache_factory_for_backend(
+        args,
+        backend,
+        window_uses_sink=False,
+    )
 
 
 def _secret_for_seed(seed: int) -> str:

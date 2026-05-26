@@ -24,14 +24,15 @@ from typing import Callable, Iterable
 
 import torch
 
-from turboquant.block_cache import (
-    BlockCacheConfig,
-    BlockKVCache,
-    HybridPolicy,
-    TokenBlockPolicy,
-    WindowBlockPolicy,
-)
+from turboquant.block_cache import BlockKVCache
 from turboquant.block_cache.bpw_metrics import attach_bpw_fields
+from turboquant.block_cache.methods import (
+    PPL_ALL_BACKENDS,
+    build_policy as _shared_build_policy,
+    cache_factory_for_backend,
+    paper_tq_pure_policy as _shared_paper_tq_pure_policy,
+    parse_backend_selection,
+)
 from turboquant.block_cache.v2_paper_cache import V2PaperCache
 from turboquant.block_cache.v3_flat_cache import V3FlatCache
 
@@ -80,126 +81,25 @@ def _model_input_device(model) -> torch.device:
 
 
 def _paper_tq_pure_policy():
-    from turboquant.block_cache.skvq_native_integration import PAPER_SINK, PAPER_WINDOW
-
-    return HybridPolicy(sink_size=PAPER_SINK, window_size=PAPER_WINDOW)
+    return _shared_paper_tq_pure_policy()
 
 
 def _build_policy(args):
-    if args.policy == "token":
-        return TokenBlockPolicy()
-    if args.policy == "window":
-        return WindowBlockPolicy(window_size=args.window, sink_size=args.sink)
-    if args.policy == "hybrid":
-        return HybridPolicy(sink_size=args.sink, window_size=args.window)
-    raise ValueError(f"unknown policy: {args.policy}")
+    return _shared_build_policy(args, window_uses_sink=True)
 
 
 def _cache_factory(args, backend: str) -> Callable[[], BlockKVCache | V2PaperCache | V3FlatCache | None]:
-    if backend == "dynamic":
-        return lambda: None
-
-    if backend == "v2_paper":
-        def make_v2() -> V2PaperCache:
-            return V2PaperCache(
-                key_bits=int(args.key_bits),
-                value_bits=int(args.value_bits),
-                n_layers=int(args.num_layers or 32),
-                seed=42,
-            )
-
-        return make_v2
-
-    if backend == "v3_flat":
-        def make_v3() -> V3FlatCache:
-            return V3FlatCache(
-                key_bits=int(args.key_bits),
-                value_bits=int(args.value_bits),
-                residual_window=int(args.residual_window),
-                protected_layers=int(args.protected_layers),
-                n_layers=int(args.num_layers or 32),
-            )
-
-        return make_v3
-
-    if backend not in {
-        "block_tq",
-        "block_tq_mix",
-        "block_skvq",
-        "block_skvq_mix",
-        "block_tq_pure",
-        "block_tq_pure_mix",
-    }:
-        raise ValueError(f"unknown backend: {backend}")
-
-    quant_backend = "skvq" if "skvq" in backend else "turboquant"
-    mixed = backend.endswith("_mix")
-
-    def make_cache() -> BlockKVCache:
-        if backend in ("block_tq_pure", "block_tq_pure_mix"):
-            from turboquant.block_cache.skvq_native_integration import (
-                PAPER_CLIP,
-                paper_pure_layer_protection,
-            )
-
-            policy = _paper_tq_pure_policy()
-            reorder_file = None
-            paper_tag = "tq_pure_mix" if backend == "block_tq_pure_mix" else "tq_pure"
-            protected_layers, prot_k, prot_v = paper_pure_layer_protection(paper_tag, args)
-            clipping = PAPER_CLIP
-        else:
-            policy = _build_policy(args)
-            reorder_file = args.reorder_file
-            protected_layers = args.protected_layers
-            prot_k = args.protected_key_bits
-            prot_v = args.protected_value_bits
-            clipping = args.clipping
-
-        cfg = BlockCacheConfig(
-            block_size=args.block_size,
-            key_bits=args.key_bits,
-            value_bits=args.value_bits,
-            granularity=args.granularity,
-            policy=policy,
-            quant_backend=quant_backend,
-            mixed_precision=mixed,
-            importance_metric=args.importance_metric,
-            important_ratio=args.important_ratio,
-            high_key_bits=args.high_key_bits,
-            high_value_bits=args.high_value_bits,
-            low_key_bits=args.low_key_bits,
-            low_value_bits=args.low_value_bits,
-            num_layers=args.num_layers,
-            protected_layers=protected_layers,
-            protected_key_bits=prot_k,
-            protected_value_bits=prot_v,
-            group_size=args.group_size,
-            key_group_size=args.key_group_size,
-            value_group_size=args.value_group_size,
-            clipping=clipping,
-            reorder_file=reorder_file,
-            max_cached_decompressed_blocks=args.max_cached_decompressed_blocks,
-        )
-        return BlockKVCache(cfg)
-
-    return make_cache
+    return cache_factory_for_backend(
+        args,
+        backend,
+        include_v2=True,
+        include_v3=True,
+        window_uses_sink=True,
+    )
 
 
 def _selected_backends(name: str) -> list[str]:
-    if name == "all":
-        return [
-            "dynamic",
-            "block_tq",
-            "block_tq_mix",
-            "block_skvq",
-            "block_skvq_mix",
-            "block_tq_pure",
-            "block_tq_pure_mix",
-            "v3_flat",
-        ]
-    if "," in name:
-        return [b.strip() for b in name.split(",") if b.strip()]
-    return [name]
+    return parse_backend_selection(name, all_backends=PPL_ALL_BACKENDS)
 
 
 def _load_texts(args) -> list[str]:

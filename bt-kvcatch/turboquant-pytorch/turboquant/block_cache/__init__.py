@@ -24,7 +24,19 @@ from .bit_allocator import (
     TopRatioPageBitAllocator,
 )
 from .skvq_quantizer import SKVQPageCompressor
-from .hf_cache import BlockKVCache, BlockCacheConfig
+from .config import BlockCacheConfig
+from .hf_cache import BlockKVCache
+from .layer import BlockCacheLayer
+from .reports import build_memory_report
+from .backends import (
+    PageQuantBackend,
+    SKVQPageBackend,
+    TurboQuantPageBackend,
+    available_page_backends,
+    build_page_backend,
+    get_page_backend_class,
+    register_page_backend,
+)
 
 __all__ = [
     "BlockState",
@@ -44,6 +56,15 @@ __all__ = [
     "FixedPageBitAllocator",
     "TopRatioPageBitAllocator",
     "SKVQPageCompressor",
+    "BlockCacheLayer",
+    "build_memory_report",
+    "PageQuantBackend",
+    "TurboQuantPageBackend",
+    "SKVQPageBackend",
+    "available_page_backends",
+    "build_page_backend",
+    "get_page_backend_class",
+    "register_page_backend",
     "BlockKVCache",
     "BlockCacheConfig",
 ]

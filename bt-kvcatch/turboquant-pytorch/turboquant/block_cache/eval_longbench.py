@@ -27,12 +27,13 @@ from typing import Callable, Iterable
 
 import torch
 
-from turboquant.block_cache import (
-    BlockCacheConfig,
-    BlockKVCache,
-    HybridPolicy,
-    TokenBlockPolicy,
-    WindowBlockPolicy,
+from turboquant.block_cache.methods import (
+    LONGBENCH_ALL_BACKENDS,
+    backend_config as _shared_backend_config,
+    build_policy as _shared_build_policy,
+    cache_factory_for_backend,
+    paper_tq_pure_policy as _shared_paper_tq_pure_policy,
+    parse_backend_selection,
 )
 
 
@@ -93,195 +94,30 @@ def _model_input_device(model) -> torch.device:
 
 
 def _selected_backends(name: str) -> list[str]:
-    if name == "all":
-        return [
-            "dynamic",
-            "block_tq",
-            "block_tq_mix",
-            "block_skvq",
-            "block_skvq_mix",
-            "block_tq_pure",
-            "block_tq_pure_mix",
-            "v3_flat",
-            "skvq_native",
-        ]
-    return _parse_csv(name) if "," in name else [name]
+    return parse_backend_selection(name, all_backends=LONGBENCH_ALL_BACKENDS)
 
 
 def _build_policy(args):
-    if args.policy == "token":
-        return TokenBlockPolicy()
-    if args.policy == "window":
-        return WindowBlockPolicy(window_size=args.window)
-    if args.policy == "hybrid":
-        return HybridPolicy(sink_size=args.sink, window_size=args.window)
-    raise ValueError(f"unknown policy: {args.policy}")
+    return _shared_build_policy(args, window_uses_sink=False)
 
 
 def _paper_tq_pure_policy():
-    from turboquant.block_cache.skvq_native_integration import PAPER_SINK, PAPER_WINDOW
-
-    return HybridPolicy(sink_size=PAPER_SINK, window_size=PAPER_WINDOW)
+    return _shared_paper_tq_pure_policy()
 
 
 def _backend_config(args, backend: str) -> dict:
-    if backend == "v3_flat":
-        return {
-            "policy": "v3_flat",
-            "key_bits": args.key_bits,
-            "value_bits": args.value_bits,
-            "residual_window": int(getattr(args, "residual_window", 128)),
-            "mixed": False,
-            "paper_baseline": "v3_flat",
-            "integration": "turboquant/V3FlatCache+MSECompressor",
-        }
-    if backend in ("block_tq_pure", "block_tq_pure_mix"):
-        from turboquant.block_cache.skvq_native_integration import (
-            PAPER_CLIP,
-            PAPER_SINK,
-            PAPER_WINDOW,
-        )
-
-        mixed = backend == "block_tq_pure_mix"
-        from turboquant.block_cache.skvq_native_integration import paper_pure_layer_protection
-
-        paper_tag = "tq_pure_mix" if mixed else "tq_pure"
-        prot_layers, prot_k, prot_v = paper_pure_layer_protection(paper_tag, args)
-        return {
-            "policy": "hybrid",
-            "block_size": args.block_size,
-            "sink": PAPER_SINK,
-            "window": PAPER_WINDOW,
-            "key_bits": args.key_bits,
-            "value_bits": args.value_bits,
-            "mixed": mixed,
-            "important_ratio": args.important_ratio if mixed else None,
-            "importance_metric": args.importance_metric if mixed else None,
-            "high_key_bits": args.high_key_bits if mixed else None,
-            "high_value_bits": args.high_value_bits if mixed else None,
-            "low_key_bits": args.low_key_bits if mixed else None,
-            "low_value_bits": args.low_value_bits if mixed else None,
-            "paper_baseline": paper_tag,
-            "reorder": False,
-            "protected_layers": prot_layers,
-            "protected_key_bits": prot_k if mixed else None,
-            "protected_value_bits": prot_v if mixed else None,
-            "clipping": PAPER_CLIP,
-            "integration": "turboquant-pytorch/BlockKVCache",
-        }
-    if backend == "skvq_native":
-        from turboquant.block_cache.skvq_native_integration import skvq_native_config
-
-        return skvq_native_config(
-            key_bits=args.key_bits,
-            value_bits=args.value_bits,
-            reorder_file=args.reorder_file,
-        )
-    return {
-        "policy": args.policy,
-        "block_size": args.block_size,
-        "sink": args.sink,
-        "window": args.window,
-        "key_bits": args.key_bits,
-        "value_bits": args.value_bits,
-        "mixed": backend.endswith("_mix"),
-        "importance_metric": args.importance_metric,
-        "important_ratio": args.important_ratio,
-        "high_key_bits": args.high_key_bits,
-        "high_value_bits": args.high_value_bits,
-        "low_key_bits": args.low_key_bits,
-        "low_value_bits": args.low_value_bits,
-        "num_layers": args.num_layers,
-        "protected_layers": args.protected_layers,
-        "protected_key_bits": args.protected_key_bits,
-        "protected_value_bits": args.protected_value_bits,
-        "group_size": args.group_size,
-        "key_group_size": args.key_group_size,
-        "value_group_size": args.value_group_size,
-        "max_cached_decompressed_blocks": args.max_cached_decompressed_blocks,
-    }
+    return _shared_backend_config(args, backend)
 
 
 def _cache_factory(args, backend: str) -> Callable:
-    if backend in {"dynamic", "skvq_native"}:
-        return lambda: None
-
-    if backend == "v3_flat":
-        from turboquant.block_cache.v3_flat_cache import V3FlatCache
-
-        def make_v3() -> V3FlatCache:
-            return V3FlatCache(
-                key_bits=int(args.key_bits),
-                value_bits=int(args.value_bits),
-                residual_window=int(getattr(args, "residual_window", 128)),
-                protected_layers=0,
-                n_layers=int(args.num_layers or 32),
-                seed=42,
-            )
-
-        return make_v3
-
-    if backend not in {
-        "block_tq",
-        "block_tq_mix",
-        "block_skvq",
-        "block_skvq_mix",
-        "block_tq_pure",
-        "block_tq_pure_mix",
-    }:
-        raise ValueError(f"unknown backend: {backend}")
-
-    quant_backend = "skvq" if "skvq" in backend else "turboquant"
-    mixed = backend.endswith("_mix")
-
-    def make_cache() -> BlockKVCache:
-        if backend in ("block_tq_pure", "block_tq_pure_mix"):
-            from turboquant.block_cache.skvq_native_integration import (
-                PAPER_CLIP,
-                paper_pure_layer_protection,
-            )
-
-            policy = _paper_tq_pure_policy()
-            reorder_file = None
-            paper_tag = "tq_pure_mix" if backend == "block_tq_pure_mix" else "tq_pure"
-            protected_layers, prot_k, prot_v = paper_pure_layer_protection(paper_tag, args)
-            clipping = PAPER_CLIP
-        else:
-            policy = _build_policy(args)
-            reorder_file = args.reorder_file
-            protected_layers = args.protected_layers
-            prot_k = args.protected_key_bits
-            prot_v = args.protected_value_bits
-            clipping = args.clipping
-
-        cfg = BlockCacheConfig(
-            block_size=args.block_size,
-            key_bits=args.key_bits,
-            value_bits=args.value_bits,
-            granularity=args.granularity,
-            policy=policy,
-            quant_backend=quant_backend,
-            mixed_precision=mixed,
-            importance_metric=args.importance_metric,
-            important_ratio=args.important_ratio,
-            high_key_bits=args.high_key_bits,
-            high_value_bits=args.high_value_bits,
-            low_key_bits=args.low_key_bits,
-            low_value_bits=args.low_value_bits,
-            num_layers=args.num_layers,
-            protected_layers=protected_layers,
-            protected_key_bits=prot_k,
-            protected_value_bits=prot_v,
-            group_size=args.group_size,
-            key_group_size=args.key_group_size,
-            value_group_size=args.value_group_size,
-            clipping=clipping,
-            reorder_file=reorder_file,
-            max_cached_decompressed_blocks=args.max_cached_decompressed_blocks,
-        )
-        return BlockKVCache(cfg)
-
-    return make_cache
+    return cache_factory_for_backend(
+        args,
+        backend,
+        include_v3=True,
+        include_skvq_native=True,
+        window_uses_sink=False,
+        v3_protected_layers=0,
+    )
 
 
 def _normalize_text(text: str) -> list[str]:

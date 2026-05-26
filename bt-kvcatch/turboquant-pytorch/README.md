@@ -243,9 +243,16 @@ python -m turboquant.block_cache.eval_niah `
 
 ## Architecture
 
+For the refactored page/backend boundary and extension points, see
+`ARCHITECTURE.md`. For experiment method names and baselines, see
+`METHODS.md`.
+
 Main files:
 
-- `turboquant/block_cache/hf_cache.py`: HuggingFace cache wrapper and per-layer block cache.
+- `turboquant/block_cache/config.py`: shared page-cache configuration.
+- `turboquant/block_cache/hf_cache.py`: HuggingFace cache wrapper.
+- `turboquant/block_cache/layer.py`: per-layer block cache and compression flow.
+- `turboquant/block_cache/backends/`: pluggable page-quantization backends.
 - `turboquant/block_cache/blocks.py`: `KVBlock` and `BlockTable`.
 - `turboquant/block_cache/policies.py`: sink/window/grouping policies.
 - `turboquant/block_cache/bit_allocator.py`: fixed and top-ratio mixed precision bit allocation.
@@ -256,6 +263,8 @@ Main files:
 - `turboquant/block_cache/experiment_main.py`: formal baseline + method comparison.
 - `turboquant/block_cache/ablation.py`: parameter sweep runner.
 - `turboquant/block_cache/profile_memory.py`: CUDA memory and latency profiler.
+- `turboquant/block_cache/methods.py`: shared method selection and cache factories for eval scripts.
+- `turboquant/block_cache/reports.py`: memory report aggregation.
 - `BlockKVCache.state_dict/load_state_dict`: cache save/load for reproducibility.
 - `max_cached_decompressed_blocks`: optional LRU cache for dequantized old pages.
 

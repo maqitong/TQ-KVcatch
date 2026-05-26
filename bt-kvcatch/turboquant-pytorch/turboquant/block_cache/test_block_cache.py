@@ -6,6 +6,8 @@ Run with:
 
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import torch
 
 from turboquant.block_cache import (
@@ -15,9 +17,17 @@ from turboquant.block_cache import (
     BlockTable,
     GroupingPolicy,
     HybridPolicy,
+    PageQuantBackend,
     SKVQPageCompressor,
     TokenBlockPolicy,
     WindowBlockPolicy,
+    available_page_backends,
+    register_page_backend,
+)
+from turboquant.block_cache.methods import (
+    NIAH_ALL_BACKENDS,
+    cache_factory_for_backend,
+    parse_backend_selection,
 )
 from turboquant.block_cache.quantizer import BlockMSECompressor
 
@@ -337,6 +347,98 @@ def test_block_kv_cache_turboquant_reorder_metadata():
     print(f"ok: test_block_kv_cache_turboquant_reorder_metadata  err={err.item():.4f}")
 
 
+def test_custom_page_backend_registry():
+    class IdentityPageBackend(PageQuantBackend):
+        name = "identity_test"
+
+        @classmethod
+        def from_runtime(cls, **kwargs):
+            return cls()
+
+        def compress(
+            self,
+            key_states,
+            value_states,
+            *,
+            key_bits,
+            value_bits,
+            layer_idx,
+        ):
+            return (
+                {"backend": self.name, "payload": key_states.clone()},
+                {"backend": self.name, "payload": value_states.clone()},
+            )
+
+        def decompress(
+            self,
+            compressed_k,
+            compressed_v,
+            *,
+            key_bits,
+            value_bits,
+            dtype,
+        ):
+            return compressed_k["payload"].to(dtype), compressed_v["payload"].to(dtype)
+
+    register_page_backend(IdentityPageBackend.name, IdentityPageBackend)
+    assert IdentityPageBackend.name in available_page_backends()
+
+    cache = BlockKVCache(BlockCacheConfig(
+        block_size=4,
+        key_bits=2,
+        value_bits=2,
+        policy=TokenBlockPolicy(),
+        quant_backend=IdentityPageBackend.name,
+    ))
+    k, v = _kv(1, 2, 8, 8)
+    full_k, full_v = cache.update(k, v, layer_idx=0)
+    blocks = cache.layers[0].table.blocks
+
+    assert torch.allclose(full_k, k, atol=0, rtol=0)
+    assert torch.allclose(full_v, v, atol=0, rtol=0)
+    assert all(b.compressed_k["backend"] == IdentityPageBackend.name for b in blocks)
+    print("ok: test_custom_page_backend_registry")
+
+
+def test_shared_method_cache_factory():
+    args = SimpleNamespace(
+        policy="hybrid",
+        block_size=4,
+        sink=4,
+        window=8,
+        key_bits=2,
+        value_bits=2,
+        granularity="per-vector",
+        importance_metric="k_norm",
+        important_ratio=0.5,
+        high_key_bits=4,
+        high_value_bits=4,
+        low_key_bits=2,
+        low_value_bits=2,
+        num_layers=2,
+        protected_layers=0,
+        protected_key_bits=8,
+        protected_value_bits=8,
+        group_size=8,
+        key_group_size=None,
+        value_group_size=None,
+        clipping=1.0,
+        reorder_file=None,
+        max_cached_decompressed_blocks=0,
+    )
+    assert parse_backend_selection("all", all_backends=NIAH_ALL_BACKENDS) == NIAH_ALL_BACKENDS
+
+    cache = cache_factory_for_backend(args, "block_tq_mix")()
+    assert isinstance(cache, BlockKVCache)
+    assert cache.config.quant_backend == "turboquant"
+    assert cache.config.mixed_precision is True
+
+    skvq_cache = cache_factory_for_backend(args, "block_skvq")()
+    assert skvq_cache.config.quant_backend == "skvq"
+    assert skvq_cache.config.mixed_precision is False
+    print("ok: test_shared_method_cache_factory")
+
+
 def test_block_kv_cache_protected_layers_override_bits():
     cache = BlockKVCache(BlockCacheConfig(
         block_size=4,
@@ -543,6 +645,8 @@ def main():
     test_block_kv_cache_skvq_mixed_precision_pages()
     test_block_kv_cache_skvq_reorder_metadata()
     test_block_kv_cache_turboquant_reorder_metadata()
+    test_custom_page_backend_registry()
+    test_shared_method_cache_factory()
     test_block_kv_cache_protected_layers_override_bits()
     test_attention_score_importance_drives_mixed_precision()
     test_record_attentions_accepts_hf_tuple_shapes()
