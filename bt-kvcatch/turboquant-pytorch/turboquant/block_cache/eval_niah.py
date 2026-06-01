@@ -114,6 +114,77 @@ def _cache_factory(args, backend: str) -> Callable[[], BlockKVCache | None]:
     )
 
 
+def _is_attention_importance(name: str) -> bool:
+    return name.replace("-", "_") in {"attention", "attention_score", "attn", "attn_score"}
+
+
+def _needs_attention_feedback(args, cache) -> bool:
+    return cache is not None and _is_attention_importance(args.importance_metric)
+
+
+@torch.no_grad()
+def _greedy_generate_with_attention_feedback(
+    model,
+    inputs,
+    cache,
+    max_new_tokens: int,
+    eos_token_id: int | None,
+) -> torch.Tensor:
+    """Greedy decoding loop that records attentions before the next cache update.
+
+    HuggingFace ``generate()`` returns attentions only after generation finishes,
+    which is too late for attention-score PageMix. This loop feeds each forward's
+    attentions back into ``BlockKVCache`` immediately, so deferred pages can be
+    scored and compressed before subsequent decode steps.
+    """
+    generated = inputs["input_ids"]
+    if max_new_tokens <= 0:
+        return generated
+
+    attention_mask = inputs.get("attention_mask")
+    model_inputs = dict(inputs)
+    outputs = model(
+        **model_inputs,
+        past_key_values=cache,
+        use_cache=True,
+        output_attentions=True,
+        return_dict=True,
+    )
+    cache.record_attentions(getattr(outputs, "attentions", None))
+
+    next_token = outputs.logits[:, -1, :].argmax(dim=-1, keepdim=True)
+    generated = torch.cat([generated, next_token], dim=-1)
+    if eos_token_id is not None and bool((next_token == eos_token_id).all().item()):
+        return generated
+
+    for _ in range(1, max_new_tokens):
+        step_inputs = {"input_ids": next_token}
+        if attention_mask is not None:
+            step_mask = torch.ones(
+                attention_mask.shape[0],
+                1,
+                dtype=attention_mask.dtype,
+                device=attention_mask.device,
+            )
+            attention_mask = torch.cat([attention_mask, step_mask], dim=-1)
+            step_inputs["attention_mask"] = attention_mask
+
+        outputs = model(
+            **step_inputs,
+            past_key_values=cache,
+            use_cache=True,
+            output_attentions=True,
+            return_dict=True,
+        )
+        cache.record_attentions(getattr(outputs, "attentions", None))
+        next_token = outputs.logits[:, -1, :].argmax(dim=-1, keepdim=True)
+        generated = torch.cat([generated, next_token], dim=-1)
+        if eos_token_id is not None and bool((next_token == eos_token_id).all().item()):
+            break
+
+    return generated
+
+
 def _secret_for_seed(seed: int) -> str:
     return f"AURORA-{(7749 + seed * 37) % 10000:04d}"
 
@@ -177,23 +248,31 @@ def run_case(model, tokenizer, args, backend: str, context_length: int, position
         torch.cuda.empty_cache()
 
     started = time.perf_counter()
-    output = model.generate(
-        **inputs,
-        past_key_values=cache,
-        max_new_tokens=args.max_new_tokens,
-        do_sample=False,
-        pad_token_id=tokenizer.eos_token_id,
-        output_attentions=args.record_attentions,
-        return_dict_in_generate=args.record_attentions,
-    )
-    seconds = time.perf_counter() - started
-
-    if args.record_attentions:
-        if cache is not None:
-            cache.record_attentions(getattr(output, "attentions", None))
-        sequences = output.sequences
+    if _needs_attention_feedback(args, cache):
+        sequences = _greedy_generate_with_attention_feedback(
+            model,
+            inputs,
+            cache,
+            args.max_new_tokens,
+            tokenizer.eos_token_id,
+        )
     else:
-        sequences = output
+        output = model.generate(
+            **inputs,
+            past_key_values=cache,
+            max_new_tokens=args.max_new_tokens,
+            do_sample=False,
+            pad_token_id=tokenizer.eos_token_id,
+            output_attentions=args.record_attentions,
+            return_dict_in_generate=args.record_attentions,
+        )
+        if args.record_attentions:
+            if cache is not None:
+                cache.record_attentions(getattr(output, "attentions", None))
+            sequences = output.sequences
+        else:
+            sequences = output
+    seconds = time.perf_counter() - started
 
     new_tokens = sequences[0, inputs.input_ids.shape[1] :]
     response = tokenizer.decode(new_tokens, skip_special_tokens=True).strip()
@@ -239,6 +318,7 @@ def run_case(model, tokenizer, args, backend: str, context_length: int, position
             "key_group_size": args.key_group_size,
             "value_group_size": args.value_group_size,
             "max_cached_decompressed_blocks": args.max_cached_decompressed_blocks,
+            "attention_feedback": _needs_attention_feedback(args, cache),
         },
     )
 
@@ -381,7 +461,9 @@ def main() -> None:
         "device_map": args.device_map,
         "dtype": _dtype_from_name(args.dtype),
     }
-    attn_impl = args.attn_implementation or ("eager" if args.record_attentions else None)
+    attn_impl = args.attn_implementation or (
+        "eager" if args.record_attentions or _is_attention_importance(args.importance_metric) else None
+    )
     if attn_impl is not None:
         model_kwargs["attn_implementation"] = attn_impl
     model = AutoModelForCausalLM.from_pretrained(args.model, **model_kwargs)
