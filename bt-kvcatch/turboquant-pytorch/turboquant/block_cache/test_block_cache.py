@@ -515,11 +515,46 @@ def test_attention_score_importance_drives_mixed_precision():
     cache.update(k1, v1, layer_idx=0)
 
     blocks = cache.layers[0].table.blocks
-    assert all(blk.state == BlockState.COMPRESSED for blk in blocks)
+    assert all(blk.state == BlockState.COMPRESSED for blk in blocks[:3])
+    assert blocks[3].state == BlockState.SEALED
+    assert blocks[3].page_meta["precision"] == "deferred"
     assert blocks[0].page_meta["precision"] == "high"
     assert (blocks[0].key_bits, blocks[0].value_bits) == (4.0, 4.0)
-    assert all((blk.key_bits, blk.value_bits) == (2.0, 2.0) for blk in blocks[1:])
+    assert all((blk.key_bits, blk.value_bits) == (2.0, 2.0) for blk in blocks[1:3])
     print("ok: test_attention_score_importance_drives_mixed_precision")
+
+
+def test_attention_score_deferred_pages_compress_after_recording():
+    cache = BlockKVCache(BlockCacheConfig(
+        block_size=4,
+        key_bits=2,
+        value_bits=2,
+        policy=TokenBlockPolicy(),
+        quant_backend="turboquant",
+        mixed_precision=True,
+        importance_metric="attention_score",
+        important_ratio=0.5,
+        high_key_bits=4,
+        high_value_bits=4,
+        low_key_bits=2,
+        low_value_bits=2,
+    ))
+
+    k, v = _kv(1, 2, 8, 8)
+    cache.update(k, v, layer_idx=0)
+    blocks = cache.layers[0].table.blocks
+    assert all(blk.state == BlockState.SEALED for blk in blocks)
+    assert all(blk.page_meta["precision"] == "deferred" for blk in blocks)
+
+    attn = torch.zeros(1, 1, 1, 8)
+    attn[..., 0:4] = 0.1
+    attn[..., 4:8] = 1.0
+    cache.record_attention(0, attn)
+
+    assert all(blk.state == BlockState.COMPRESSED for blk in blocks)
+    assert blocks[1].page_meta["precision"] == "high"
+    assert blocks[0].page_meta["precision"] == "low"
+    print("ok: test_attention_score_deferred_pages_compress_after_recording")
 
 
 def test_record_attentions_accepts_hf_tuple_shapes():
@@ -649,6 +684,7 @@ def main():
     test_shared_method_cache_factory()
     test_block_kv_cache_protected_layers_override_bits()
     test_attention_score_importance_drives_mixed_precision()
+    test_attention_score_deferred_pages_compress_after_recording()
     test_record_attentions_accepts_hf_tuple_shapes()
     test_block_kv_cache_state_dict_roundtrip_and_continue()
     test_block_kv_cache_state_dict_skvq_roundtrip()

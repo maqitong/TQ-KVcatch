@@ -20,6 +20,9 @@ from .hf_compat import HF_AVAILABLE, HFCacheLayerMixin
 from .page_importance import build_page_importance_scorer
 
 
+_ATTENTION_IMPORTANCE_NAMES = {"attention", "attention_score", "attn", "attn_score"}
+
+
 class BlockCacheLayer(HFCacheLayerMixin):
     """A single transformer layer's block-structured KV cache.
 
@@ -139,6 +142,77 @@ class BlockCacheLayer(HFCacheLayerMixin):
             )
         self.is_initialized = True
 
+    def _uses_attention_importance(self) -> bool:
+        return (
+            self.cfg.mixed_precision
+            and self.cfg.importance_metric.replace("-", "_") in _ATTENTION_IMPORTANCE_NAMES
+        )
+
+    def _has_attention_score(self, blk: KVBlock) -> bool:
+        return (
+            isinstance(blk.page_meta, dict)
+            and float(blk.page_meta.get("attention_count", 0.0)) > 0.0
+        )
+
+    def _attention_ready_blocks(self, blocks: list[KVBlock]) -> list[KVBlock]:
+        if not self._uses_attention_importance():
+            return blocks
+
+        ready: list[KVBlock] = []
+        for blk in blocks:
+            if self._has_attention_score(blk):
+                ready.append(blk)
+                continue
+            meta = dict(blk.page_meta) if isinstance(blk.page_meta, dict) else {}
+            meta.update(
+                {
+                    "allocator": "top_ratio",
+                    "importance_metric": "attention_score",
+                    "precision": "deferred",
+                    "defer_reason": "waiting_for_attention_score",
+                }
+            )
+            blk.page_meta = meta
+        return ready
+
+    def _compress_blocks(self, blocks: list[KVBlock]) -> None:
+        if not blocks:
+            return
+        if self.bit_allocator is None or self.page_backend is None or self.table is None:
+            raise RuntimeError("cache layer was not initialized")
+
+        bit_assignments = self.bit_allocator.assign_many(
+            blocks, self.table, self.layer_idx
+        )
+        for blk in blocks:
+            if blk.state != BlockState.SEALED:
+                continue
+            k_bits, v_bits = bit_assignments[blk.block_idx]
+            k_bits, v_bits = self._apply_layer_protection(blk, k_bits, v_bits)
+            blk.key_bits = k_bits
+            blk.value_bits = v_bits
+            ck, cv = self.page_backend.compress(
+                blk.fp16_k,
+                blk.fp16_v,
+                key_bits=k_bits,
+                value_bits=v_bits,
+                layer_idx=self.layer_idx,
+            )
+            blk.to_compressed(ck, cv)
+            self._invalidate_decompressed_cache(blk.block_idx)
+
+    def _compress_attention_ready_sealed_blocks(self) -> None:
+        if not self._uses_attention_importance() or self.table is None:
+            return
+        sealed = [
+            blk for blk in self.table.blocks if blk.state == BlockState.SEALED
+        ]
+        if not sealed:
+            return
+        candidates = self.cfg.policy.on_seal(sealed, self.table)
+        ready = self._attention_ready_blocks(candidates)
+        self._compress_blocks(ready)
+
     def lazy_initialization(
         self, key_states: torch.Tensor, value_states: torch.Tensor
     ) -> None:
@@ -216,23 +290,8 @@ class BlockCacheLayer(HFCacheLayerMixin):
         sealed = self.table.append(key_states, value_states)
         if sealed:
             to_compress = self.cfg.policy.on_seal(sealed, self.table)
-            bit_assignments = self.bit_allocator.assign_many(
-                to_compress, self.table, self.layer_idx
-            )
-            for blk in to_compress:
-                k_bits, v_bits = bit_assignments[blk.block_idx]
-                k_bits, v_bits = self._apply_layer_protection(blk, k_bits, v_bits)
-                blk.key_bits = k_bits
-                blk.value_bits = v_bits
-                ck, cv = self.page_backend.compress(
-                    blk.fp16_k,
-                    blk.fp16_v,
-                    key_bits=k_bits,
-                    value_bits=v_bits,
-                    layer_idx=self.layer_idx,
-                )
-                blk.to_compressed(ck, cv)
-                self._invalidate_decompressed_cache(blk.block_idx)
+            to_compress = self._attention_ready_blocks(to_compress)
+            self._compress_blocks(to_compress)
 
         return self._materialize(key_states.dtype)
 
@@ -318,6 +377,7 @@ class BlockCacheLayer(HFCacheLayerMixin):
             meta["attention_score"] = float(meta.get("attention_score", 0.0)) + mass
             meta["attention_count"] = float(meta.get("attention_count", 0.0)) + count
             blk.page_meta = meta
+        self._compress_attention_ready_sealed_blocks()
 
     def get_mask_sizes(self, query_length: int) -> tuple[int, int]:
         if torch.is_tensor(query_length):

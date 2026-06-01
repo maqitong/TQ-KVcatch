@@ -47,6 +47,7 @@ import torch
 
 from turboquant.block_cache.eval_niah import (
     _dtype_from_name,
+    _is_attention_importance,
     _parse_float_list,
     _parse_int_list,
     _selected_backends,
@@ -306,7 +307,11 @@ def main() -> None:
         "device_map": base.device_map,
         "dtype": _dtype_from_name(base.dtype),
     }
-    attn_impl = base.attn_implementation or ("eager" if base.record_attentions else None)
+    attn_impl = base.attn_implementation or (
+        "eager"
+        if base.record_attentions or _is_attention_importance(base.importance_metric)
+        else None
+    )
     if attn_impl is not None:
         model_kwargs["attn_implementation"] = attn_impl
     model = AutoModelForCausalLM.from_pretrained(base.model, **model_kwargs)
