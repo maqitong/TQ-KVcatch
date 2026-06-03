@@ -61,6 +61,16 @@ def _parse_bits(value: str) -> float:
     return int(bits) if bits == round(bits) else bits
 
 
+def _parse_optional_int(value: str) -> int | None:
+    lowered = value.strip().lower()
+    if lowered in {"all", "none", "null", "sync"}:
+        return None
+    parsed = int(value)
+    if parsed < 0:
+        raise argparse.ArgumentTypeError("value must be non-negative or all")
+    return parsed
+
+
 def _dtype_from_name(name: str) -> torch.dtype:
     if name == "auto":
         return torch.float16 if torch.cuda.is_available() else torch.float32
@@ -261,6 +271,7 @@ def evaluate_backend(model, input_ids: torch.Tensor, args, backend: str) -> PPLR
             "key_group_size": args.key_group_size,
             "value_group_size": args.value_group_size,
             "max_cached_decompressed_blocks": args.max_cached_decompressed_blocks,
+            "quant_budget_per_update": args.quant_budget_per_update,
             "residual_window": args.residual_window if backend == "v3_flat" else None,
             "integration": (
                 "turboquant/V2PaperCache+CompressorV2(QJL)"
@@ -345,6 +356,12 @@ def main() -> None:
     parser.add_argument("--clipping", type=float, default=0.92)
     parser.add_argument("--reorder-file", default=None)
     parser.add_argument("--max-cached-decompressed-blocks", type=int, default=0)
+    parser.add_argument(
+        "--quant-budget-per-update",
+        type=_parse_optional_int,
+        default=None,
+        help="Pseudo-async quant cursor budget: all/none or 0/1/2/... pages per update.",
+    )
 
     parser.add_argument("--importance-metric", default="k_norm")
     parser.add_argument("--important-ratio", type=float, default=0.3)

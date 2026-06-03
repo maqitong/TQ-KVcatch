@@ -29,7 +29,7 @@ from typing import Callable
 
 import torch
 
-from turboquant.block_cache.eval_niah import build_prompt
+from turboquant.block_cache.eval_niah import _parse_optional_int, build_prompt
 from turboquant.block_cache.methods import (
     MethodSpec,
     build_main_methods as _shared_build_main_methods,
@@ -433,6 +433,7 @@ def _write_outputs(results: list[MainResult], args) -> None:
                     "key_group_size": args.key_group_size,
                     "value_group_size": args.value_group_size,
                     "max_cached_decompressed_blocks": args.max_cached_decompressed_blocks,
+                    "quant_budget_per_update": args.quant_budget_per_update,
                     "important_ratio": args.important_ratio,
                     "high_bits": [args.high_key_bits, args.high_value_bits],
                     "low_bits": [args.low_key_bits, args.low_value_bits],
@@ -530,6 +531,12 @@ def main() -> None:
     parser.add_argument("--clipping", type=float, default=0.92)
     parser.add_argument("--reorder-file", default=None)
     parser.add_argument("--max-cached-decompressed-blocks", type=int, default=0)
+    parser.add_argument(
+        "--quant-budget-per-update",
+        type=_parse_optional_int,
+        default=None,
+        help="Pseudo-async quant cursor budget: all/none or 0/1/2/... pages per update.",
+    )
 
     parser.add_argument("--importance-metric", default="k_norm")
     parser.add_argument("--important-ratio", type=float, default=0.3)

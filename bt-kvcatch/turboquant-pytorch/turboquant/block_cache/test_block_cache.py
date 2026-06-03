@@ -557,6 +557,78 @@ def test_attention_score_deferred_pages_compress_after_recording():
     print("ok: test_attention_score_deferred_pages_compress_after_recording")
 
 
+def test_budgeted_quant_cursor_limits_compression_per_update():
+    cache = BlockKVCache(BlockCacheConfig(
+        block_size=4,
+        key_bits=8,
+        value_bits=8,
+        policy=TokenBlockPolicy(),
+        quant_backend="turboquant",
+        quant_budget_per_update=1,
+    ))
+
+    k, v = _kv(1, 2, 12, 8)
+    cache.update(k, v, layer_idx=0)
+    blocks = cache.layers[0].table.blocks
+    assert [blk.state for blk in blocks] == [
+        BlockState.COMPRESSED,
+        BlockState.SEALED,
+        BlockState.SEALED,
+    ]
+    report = cache.memory_report()
+    assert report["n_compressed_blocks"] == 1
+    assert report["n_pending_quant_blocks"] == 2
+
+    k1, v1 = _kv(1, 2, 1, 8)
+    cache.update(k1, v1, layer_idx=0)
+    assert [blk.state for blk in blocks[:3]] == [
+        BlockState.COMPRESSED,
+        BlockState.COMPRESSED,
+        BlockState.SEALED,
+    ]
+    assert cache.memory_report()["n_pending_quant_blocks"] == 1
+    print("ok: test_budgeted_quant_cursor_limits_compression_per_update")
+
+
+def test_budgeted_attention_score_compresses_ready_pages_by_budget():
+    cache = BlockKVCache(BlockCacheConfig(
+        block_size=4,
+        key_bits=2,
+        value_bits=2,
+        policy=TokenBlockPolicy(),
+        quant_backend="turboquant",
+        mixed_precision=True,
+        importance_metric="attention_score",
+        important_ratio=0.5,
+        high_key_bits=4,
+        high_value_bits=4,
+        low_key_bits=2,
+        low_value_bits=2,
+        quant_budget_per_update=1,
+    ))
+
+    k, v = _kv(1, 2, 8, 8)
+    cache.update(k, v, layer_idx=0)
+    blocks = cache.layers[0].table.blocks
+    assert all(blk.state == BlockState.SEALED for blk in blocks)
+    assert cache.memory_report()["n_pending_quant_blocks"] == 2
+
+    attn = torch.zeros(1, 1, 1, 8)
+    attn[..., 0:4] = 0.1
+    attn[..., 4:8] = 1.0
+    cache.record_attention(0, attn)
+
+    assert blocks[0].state == BlockState.COMPRESSED
+    assert blocks[1].state == BlockState.SEALED
+    assert cache.memory_report()["n_pending_quant_blocks"] == 1
+
+    k1, v1 = _kv(1, 2, 1, 8)
+    cache.update(k1, v1, layer_idx=0)
+    assert all(blk.state == BlockState.COMPRESSED for blk in blocks[:2])
+    assert cache.memory_report()["n_pending_quant_blocks"] == 0
+    print("ok: test_budgeted_attention_score_compresses_ready_pages_by_budget")
+
+
 def test_record_attentions_accepts_hf_tuple_shapes():
     cache = BlockKVCache(BlockCacheConfig(
         block_size=4,
@@ -685,6 +757,8 @@ def main():
     test_block_kv_cache_protected_layers_override_bits()
     test_attention_score_importance_drives_mixed_precision()
     test_attention_score_deferred_pages_compress_after_recording()
+    test_budgeted_quant_cursor_limits_compression_per_update()
+    test_budgeted_attention_score_compresses_ready_pages_by_budget()
     test_record_attentions_accepts_hf_tuple_shapes()
     test_block_kv_cache_state_dict_roundtrip_and_continue()
     test_block_kv_cache_state_dict_skvq_roundtrip()

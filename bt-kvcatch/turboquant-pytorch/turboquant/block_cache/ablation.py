@@ -50,6 +50,7 @@ from turboquant.block_cache.eval_niah import (
     _is_attention_importance,
     _parse_float_list,
     _parse_int_list,
+    _parse_optional_int,
     _selected_backends,
     run_case,
 )
@@ -60,7 +61,7 @@ DEFAULT_SWEEP: dict[str, list[Any]] = {}
 
 def _parse_scalar(value: str) -> Any:
     lowered = value.strip().lower()
-    if lowered in {"none", "null"}:
+    if lowered in {"none", "null", "all", "sync"}:
         return None
     if lowered in {"true", "false"}:
         return lowered == "true"
@@ -148,6 +149,9 @@ def _base_args(cli_args, config: dict[str, Any]) -> SimpleNamespace:
         "max_cached_decompressed_blocks": config.get(
             "max_cached_decompressed_blocks", cli_args.max_cached_decompressed_blocks
         ),
+        "quant_budget_per_update": config.get(
+            "quant_budget_per_update", cli_args.quant_budget_per_update
+        ),
         "importance_metric": config.get("importance_metric", cli_args.importance_metric),
         "important_ratio": config.get("important_ratio", cli_args.important_ratio),
         "high_key_bits": config.get("high_key_bits", cli_args.high_key_bits),
@@ -164,6 +168,10 @@ def _base_args(cli_args, config: dict[str, Any]) -> SimpleNamespace:
     merged["context_lengths"] = _as_list(merged["context_lengths"], _parse_int_list)
     merged["positions"] = _as_list(merged["positions"], _parse_float_list)
     merged["seeds"] = _as_list(merged["seeds"], _parse_int_list)
+    if isinstance(merged["quant_budget_per_update"], str):
+        merged["quant_budget_per_update"] = _parse_optional_int(
+            merged["quant_budget_per_update"]
+        )
     return SimpleNamespace(**merged)
 
 
@@ -194,6 +202,7 @@ def _write_outputs(rows: list[dict[str, Any]], output_dir: Path) -> None:
         "low_value_bits",
         "key_group_size",
         "value_group_size",
+        "quant_budget_per_update",
     ]
     with csv_path.open("w", newline="", encoding="utf-8") as f:
         writer = csv.DictWriter(f, fieldnames=columns, extrasaction="ignore")
@@ -265,6 +274,12 @@ def main() -> None:
     parser.add_argument("--clipping", type=float, default=0.92)
     parser.add_argument("--reorder-file", default=None)
     parser.add_argument("--max-cached-decompressed-blocks", type=int, default=0)
+    parser.add_argument(
+        "--quant-budget-per-update",
+        type=_parse_optional_int,
+        default=None,
+        help="Pseudo-async quant cursor budget: all/none or 0/1/2/... pages per update.",
+    )
 
     parser.add_argument("--importance-metric", default="k_norm")
     parser.add_argument("--important-ratio", type=float, default=0.3)

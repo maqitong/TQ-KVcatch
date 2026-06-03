@@ -37,3 +37,11 @@ class BlockCacheConfig:
     reorder_file: Optional[str] = None
     reorder_meta: Optional[dict[str, Any]] = None
     max_cached_decompressed_blocks: int = 0
+    # None keeps the original synchronous behavior. An integer enables a
+    # budgeted "quant cursor": ready pages are queued and at most this many
+    # pages are compressed per cache update / attention feedback call.
+    quant_budget_per_update: Optional[int] = None
+
+    def __post_init__(self) -> None:
+        if self.quant_budget_per_update is not None and self.quant_budget_per_update < 0:
+            raise ValueError("quant_budget_per_update must be non-negative or None")

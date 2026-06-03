@@ -14,13 +14,25 @@ def build_memory_report(layers: Iterable[Any]) -> dict[str, Any]:
     fp16_baseline = 0
     n_compressed_blocks = 0
     n_fp16_blocks = 0
+    n_pending_quant_blocks = 0
     bit_histogram: dict[str, int] = {}
     precision_histogram: dict[str, int] = {}
+    quant_status_histogram: dict[str, int] = {}
 
     for layer in layers:
         if layer.table is None:
             continue
+        n_pending_quant_blocks += len(getattr(layer, "_pending_quant_blocks", []))
         for blk in layer.table.blocks:
+            quant_status = (
+                blk.page_meta.get("quant_status")
+                if isinstance(blk.page_meta, dict)
+                else None
+            )
+            if quant_status is not None:
+                quant_status_histogram[quant_status] = (
+                    quant_status_histogram.get(quant_status, 0) + 1
+                )
             if blk.state == BlockState.COMPRESSED:
                 n_compressed_blocks += 1
                 k_bits = blk.key_bits if blk.key_bits is not None else "?"
@@ -56,7 +68,9 @@ def build_memory_report(layers: Iterable[Any]) -> dict[str, Any]:
         ),
         "n_compressed_blocks": n_compressed_blocks,
         "n_fp16_blocks": n_fp16_blocks,
+        "n_pending_quant_blocks": n_pending_quant_blocks,
         "n_layers": len(layers),
         "bit_histogram": bit_histogram,
         "precision_histogram": precision_histogram,
+        "quant_status_histogram": quant_status_histogram,
     }

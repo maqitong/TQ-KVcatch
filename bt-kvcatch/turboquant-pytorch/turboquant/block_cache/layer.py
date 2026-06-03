@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import warnings
-from collections import OrderedDict
+from collections import OrderedDict, deque
 from typing import Any, Optional
 
 import torch
@@ -59,6 +59,8 @@ class BlockCacheLayer(HFCacheLayerMixin):
         self._decompressed_cache: OrderedDict[
             tuple[int, str, str], tuple[torch.Tensor, torch.Tensor]
         ] = OrderedDict()
+        self._pending_quant_blocks: deque[int] = deque()
+        self._pending_quant_block_ids: set[int] = set()
         self.dtype: Optional[torch.dtype] = None
         self.device: Optional[torch.device] = None
 
@@ -154,6 +156,9 @@ class BlockCacheLayer(HFCacheLayerMixin):
             and float(blk.page_meta.get("attention_count", 0.0)) > 0.0
         )
 
+    def _uses_budgeted_quantization(self) -> bool:
+        return self.cfg.quant_budget_per_update is not None
+
     def _attention_ready_blocks(self, blocks: list[KVBlock]) -> list[KVBlock]:
         if not self._uses_attention_importance():
             return blocks
@@ -175,15 +180,69 @@ class BlockCacheLayer(HFCacheLayerMixin):
             blk.page_meta = meta
         return ready
 
-    def _compress_blocks(self, blocks: list[KVBlock]) -> None:
+    def _mark_pending_quant(self, blk: KVBlock) -> None:
+        meta = dict(blk.page_meta) if isinstance(blk.page_meta, dict) else {}
+        meta["quant_status"] = "pending"
+        if self._uses_attention_importance() and not self._has_attention_score(blk):
+            meta.update(
+                {
+                    "allocator": "top_ratio",
+                    "importance_metric": "attention_score",
+                    "precision": "deferred",
+                    "defer_reason": "waiting_for_attention_score",
+                }
+            )
+        blk.page_meta = meta
+
+    def _enqueue_quant_blocks(self, blocks: list[KVBlock]) -> None:
+        for blk in blocks:
+            if blk.state != BlockState.SEALED:
+                continue
+            if blk.block_idx in self._pending_quant_block_ids:
+                continue
+            self._mark_pending_quant(blk)
+            self._pending_quant_blocks.append(blk.block_idx)
+            self._pending_quant_block_ids.add(blk.block_idx)
+
+    def _ready_pending_quant_blocks(self) -> list[KVBlock]:
+        if self.table is None:
+            return []
+        ready: list[KVBlock] = []
+        valid_queue: deque[int] = deque()
+        valid_ids: set[int] = set()
+
+        for block_idx in self._pending_quant_blocks:
+            if block_idx >= len(self.table.blocks):
+                continue
+            blk = self.table.blocks[block_idx]
+            if blk.state != BlockState.SEALED:
+                continue
+
+            valid_queue.append(block_idx)
+            valid_ids.add(block_idx)
+            if self._uses_attention_importance() and not self._has_attention_score(blk):
+                self._mark_pending_quant(blk)
+                continue
+            ready.append(blk)
+
+        self._pending_quant_blocks = valid_queue
+        self._pending_quant_block_ids = valid_ids
+        return ready
+
+    def _compress_blocks(
+        self,
+        blocks: list[KVBlock],
+        bit_assignments: Optional[dict[int, tuple[float, float]]] = None,
+    ) -> None:
         if not blocks:
             return
         if self.bit_allocator is None or self.page_backend is None or self.table is None:
             raise RuntimeError("cache layer was not initialized")
 
-        bit_assignments = self.bit_allocator.assign_many(
-            blocks, self.table, self.layer_idx
-        )
+        if bit_assignments is None:
+            bit_assignments = self.bit_allocator.assign_many(
+                blocks, self.table, self.layer_idx
+            )
         for blk in blocks:
             if blk.state != BlockState.SEALED:
                 continue
@@ -199,19 +258,75 @@ class BlockCacheLayer(HFCacheLayerMixin):
                 layer_idx=self.layer_idx,
             )
             blk.to_compressed(ck, cv)
+            meta = dict(blk.page_meta) if isinstance(blk.page_meta, dict) else {}
+            meta["quant_status"] = "compressed"
+            meta.pop("defer_reason", None)
+            blk.page_meta = meta
             self._invalidate_decompressed_cache(blk.block_idx)
 
-    def _compress_attention_ready_sealed_blocks(self) -> None:
-        if not self._uses_attention_importance() or self.table is None:
+    def _step_pending_quantization(self) -> None:
+        budget = self.cfg.quant_budget_per_update
+        if budget is None or budget <= 0 or self.table is None:
             return
+        if self.bit_allocator is None:
+            raise RuntimeError("cache layer was not initialized")
+
+        ready_pool = self._ready_pending_quant_blocks()
+        if not ready_pool:
+            return
+
+        # Assign precision across all currently-ready queued pages, then let the
+        # cursor compress only the oldest `budget` pages. This keeps PageMix's
+        # high/low decision tied to the pending pool instead of the tiny batch
+        # that happens to fit this step's budget.
+        bit_assignments = self.bit_allocator.assign_many(
+            ready_pool, self.table, self.layer_idx
+        )
+        ready_ids = {blk.block_idx for blk in ready_pool}
+        chosen_ids: set[int] = set()
+        for block_idx in self._pending_quant_blocks:
+            if block_idx in ready_ids:
+                chosen_ids.add(block_idx)
+                if len(chosen_ids) >= budget:
+                    break
+
+        to_compress = [
+            self.table.blocks[block_idx]
+            for block_idx in self._pending_quant_blocks
+            if block_idx in chosen_ids
+        ]
+        self._compress_blocks(to_compress, bit_assignments=bit_assignments)
+
+        self._pending_quant_blocks = deque(
+            block_idx
+            for block_idx in self._pending_quant_blocks
+            if block_idx not in chosen_ids
+        )
+        self._pending_quant_block_ids.difference_update(chosen_ids)
+
+    def _policy_candidates_for_sealed_blocks(self) -> list[KVBlock]:
+        if self.table is None:
+            return []
         sealed = [
             blk for blk in self.table.blocks if blk.state == BlockState.SEALED
         ]
         if not sealed:
+            return []
+        return self.cfg.policy.on_seal(sealed, self.table)
+
+    def _schedule_or_compress_blocks(self, blocks: list[KVBlock]) -> None:
+        if self._uses_budgeted_quantization():
+            self._enqueue_quant_blocks(blocks)
+            self._step_pending_quantization()
             return
-        candidates = self.cfg.policy.on_seal(sealed, self.table)
-        ready = self._attention_ready_blocks(candidates)
+
+        ready = self._attention_ready_blocks(blocks)
         self._compress_blocks(ready)
+
+    def _compress_attention_ready_sealed_blocks(self) -> None:
+        if not self._uses_attention_importance() or self.table is None:
+            return
+        self._schedule_or_compress_blocks(self._policy_candidates_for_sealed_blocks())
 
     def lazy_initialization(
         self, key_states: torch.Tensor, value_states: torch.Tensor
@@ -290,8 +405,9 @@ class BlockCacheLayer(HFCacheLayerMixin):
         sealed = self.table.append(key_states, value_states)
         if sealed:
             to_compress = self.cfg.policy.on_seal(sealed, self.table)
-            to_compress = self._attention_ready_blocks(to_compress)
-            self._compress_blocks(to_compress)
+            self._schedule_or_compress_blocks(to_compress)
+        elif self._uses_budgeted_quantization():
+            self._step_pending_quantization()
 
         return self._materialize(key_states.dtype)
 
@@ -394,6 +510,8 @@ class BlockCacheLayer(HFCacheLayerMixin):
         if self.table is not None:
             self.table.blocks.clear()
         self._invalidate_decompressed_cache()
+        self._pending_quant_blocks.clear()
+        self._pending_quant_block_ids.clear()
         self.page_backend = None
         self.skvq_compressor = None
         self.tq_reorder_idx = None
@@ -403,6 +521,8 @@ class BlockCacheLayer(HFCacheLayerMixin):
         if self.table is None:
             return
         self._invalidate_decompressed_cache()
+        self._pending_quant_blocks.clear()
+        self._pending_quant_block_ids.clear()
         for blk in self.table.blocks:
             if blk.fp16_k is not None:
                 blk.fp16_k = blk.fp16_k.index_select(0, beam_idx.to(blk.fp16_k.device))
@@ -424,6 +544,8 @@ class BlockCacheLayer(HFCacheLayerMixin):
         if self.get_seq_length() <= max_length:
             return
         self._invalidate_decompressed_cache()
+        self._pending_quant_blocks.clear()
+        self._pending_quant_block_ids.clear()
 
         kept: list[KVBlock] = []
         cursor = 0
@@ -461,6 +583,8 @@ class BlockCacheLayer(HFCacheLayerMixin):
         if self.table is None:
             return
         self._invalidate_decompressed_cache()
+        self._pending_quant_blocks.clear()
+        self._pending_quant_block_ids.clear()
         for blk in self.table.blocks:
             if blk.fp16_k is not None:
                 blk.fp16_k = blk.fp16_k.repeat_interleave(repeats, dim=0)
@@ -479,6 +603,8 @@ class BlockCacheLayer(HFCacheLayerMixin):
         if self.table is None:
             return
         self._invalidate_decompressed_cache()
+        self._pending_quant_blocks.clear()
+        self._pending_quant_block_ids.clear()
         for blk in self.table.blocks:
             if blk.fp16_k is not None:
                 blk.fp16_k = blk.fp16_k[indices]
@@ -528,6 +654,7 @@ class BlockCacheLayer(HFCacheLayerMixin):
             "dtype": self.dtype,
             "device": str(self.device),
             "decompressed_cache_entries": len(self._decompressed_cache),
+            "pending_quant_blocks": list(self._pending_quant_blocks),
             "table": {
                 "block_size": self.table.block_size,
                 "head_dim": self.table.head_dim,
@@ -589,3 +716,13 @@ class BlockCacheLayer(HFCacheLayerMixin):
                 page_meta=block_state.get("page_meta"),
             )
             self.table.blocks.append(blk)
+
+        pending = []
+        for block_idx in state.get("pending_quant_blocks", []):
+            idx = int(block_idx)
+            if 0 <= idx < len(self.table.blocks):
+                blk = self.table.blocks[idx]
+                if blk.state == BlockState.SEALED:
+                    pending.append(idx)
+        self._pending_quant_blocks = deque(pending)
+        self._pending_quant_block_ids = set(pending)

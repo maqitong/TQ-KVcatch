@@ -38,10 +38,12 @@ class FixedPageBitAllocator(PageBitAllocator):
     def assign(self, block: "KVBlock", table: "BlockTable", layer_idx: int) -> BitPair:
         block.key_bits = self.key_bits
         block.value_bits = self.value_bits
-        block.page_meta = {
+        meta = dict(block.page_meta) if isinstance(block.page_meta, dict) else {}
+        meta.update({
             "allocator": "fixed",
             "importance": block.importance,
-        }
+        })
+        block.page_meta = meta
         return self.key_bits, self.value_bits
 
 
@@ -67,12 +69,14 @@ class TopRatioPageBitAllocator(PageBitAllocator):
     def assign(self, block: "KVBlock", table: "BlockTable", layer_idx: int) -> BitPair:
         block.importance = self.scorer.score(block, table, layer_idx)
         block.key_bits, block.value_bits = self.low_bits
-        block.page_meta = {
+        meta = dict(block.page_meta) if isinstance(block.page_meta, dict) else {}
+        meta.update({
             "allocator": "top_ratio",
             "importance_metric": self.scorer.name,
             "importance": block.importance,
             "precision": "low",
-        }
+        })
+        block.page_meta = meta
         return self.low_bits
 
     def assign_many(
@@ -102,13 +106,15 @@ class TopRatioPageBitAllocator(PageBitAllocator):
             is_high = block.block_idx in high_ids
             bits = self.high_bits if is_high else self.low_bits
             block.key_bits, block.value_bits = bits
-            block.page_meta = {
+            meta = dict(block.page_meta) if isinstance(block.page_meta, dict) else {}
+            meta.update({
                 "allocator": "top_ratio",
                 "importance_metric": self.scorer.name,
                 "importance": score,
                 "rank": rank,
                 "threshold": threshold,
                 "precision": "high" if is_high else "low",
-            }
+            })
+            block.page_meta = meta
             out[block.block_idx] = bits
         return out

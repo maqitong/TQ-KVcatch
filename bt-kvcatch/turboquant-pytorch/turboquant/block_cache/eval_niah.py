@@ -75,6 +75,16 @@ def _parse_int_list(value: str) -> list[int]:
     return [int(v.strip()) for v in value.split(",") if v.strip()]
 
 
+def _parse_optional_int(value: str) -> int | None:
+    lowered = value.strip().lower()
+    if lowered in {"all", "none", "null", "sync"}:
+        return None
+    parsed = int(value)
+    if parsed < 0:
+        raise argparse.ArgumentTypeError("value must be non-negative or all")
+    return parsed
+
+
 def _parse_float_list(value: str) -> list[float]:
     return [float(v.strip()) for v in value.split(",") if v.strip()]
 
@@ -119,7 +129,11 @@ def _is_attention_importance(name: str) -> bool:
 
 
 def _needs_attention_feedback(args, cache) -> bool:
-    return cache is not None and _is_attention_importance(args.importance_metric)
+    return (
+        cache is not None
+        and getattr(getattr(cache, "config", None), "mixed_precision", False)
+        and _is_attention_importance(args.importance_metric)
+    )
 
 
 @torch.no_grad()
@@ -318,6 +332,7 @@ def run_case(model, tokenizer, args, backend: str, context_length: int, position
             "key_group_size": args.key_group_size,
             "value_group_size": args.value_group_size,
             "max_cached_decompressed_blocks": args.max_cached_decompressed_blocks,
+            "quant_budget_per_update": args.quant_budget_per_update,
             "attention_feedback": _needs_attention_feedback(args, cache),
         },
     )
@@ -430,6 +445,15 @@ def main() -> None:
     parser.add_argument("--clipping", type=float, default=0.92)
     parser.add_argument("--reorder-file", default=None)
     parser.add_argument("--max-cached-decompressed-blocks", type=int, default=0)
+    parser.add_argument(
+        "--quant-budget-per-update",
+        type=_parse_optional_int,
+        default=None,
+        help=(
+            "Pseudo-async quant cursor budget. Use all/none for synchronous "
+            "compression, or 0/1/2/... pages per cache update."
+        ),
+    )
 
     parser.add_argument("--importance-metric", default="k_norm")
     parser.add_argument("--important-ratio", type=float, default=0.3)

@@ -25,6 +25,7 @@ import torch
 from turboquant.block_cache.eval_niah import (
     _cache_factory,
     _dtype_from_name,
+    _parse_optional_int,
     _selected_backends,
     build_prompt,
 )
@@ -160,6 +161,7 @@ def profile_backend(model, tokenizer, args, backend: str) -> ProfileResult:
             "protected_key_bits": args.protected_key_bits,
             "protected_value_bits": args.protected_value_bits,
             "max_cached_decompressed_blocks": args.max_cached_decompressed_blocks,
+            "quant_budget_per_update": args.quant_budget_per_update,
         },
     )
 
@@ -270,6 +272,12 @@ def main() -> None:
     parser.add_argument("--clipping", type=float, default=0.92)
     parser.add_argument("--reorder-file", default=None)
     parser.add_argument("--max-cached-decompressed-blocks", type=int, default=0)
+    parser.add_argument(
+        "--quant-budget-per-update",
+        type=_parse_optional_int,
+        default=None,
+        help="Pseudo-async quant cursor budget: all/none or 0/1/2/... pages per update.",
+    )
 
     parser.add_argument("--importance-metric", default="k_norm")
     parser.add_argument("--important-ratio", type=float, default=0.3)
