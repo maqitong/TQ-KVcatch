@@ -59,6 +59,11 @@ class BlockCacheLayer(HFCacheLayerMixin):
         self._decompressed_cache: OrderedDict[
             tuple[int, str, str], tuple[torch.Tensor, torch.Tensor]
         ] = OrderedDict()
+        self._mat_k: Optional[torch.Tensor] = None
+        self._mat_v: Optional[torch.Tensor] = None
+        self._mat_sig: list[tuple[Any, ...]] = []
+        self._mat_dtype: Optional[torch.dtype] = None
+        self._mat_device: Optional[torch.device] = None
         self._pending_quant_blocks: deque[int] = deque()
         self._pending_quant_block_ids: set[int] = set()
         self.dtype: Optional[torch.dtype] = None
@@ -142,6 +147,7 @@ class BlockCacheLayer(HFCacheLayerMixin):
             self.bit_allocator = FixedPageBitAllocator(
                 self.cfg.key_bits, self.cfg.value_bits
             )
+        self._invalidate_materialized_cache()
         self.is_initialized = True
 
     def _uses_attention_importance(self) -> bool:
@@ -390,6 +396,32 @@ class BlockCacheLayer(HFCacheLayerMixin):
             if key[0] == block_idx:
                 del self._decompressed_cache[key]
 
+    def _invalidate_materialized_cache(self) -> None:
+        self._mat_k = None
+        self._mat_v = None
+        self._mat_sig = []
+        self._mat_dtype = None
+        self._mat_device = None
+
+    def _block_signature(self, blk: KVBlock) -> tuple[Any, ...]:
+        if blk.state == BlockState.COMPRESSED:
+            return (
+                blk.block_idx,
+                blk.state.value,
+                blk.current_len,
+                blk.key_bits,
+                blk.value_bits,
+                id(blk.compressed_k),
+                id(blk.compressed_v),
+            )
+        return (
+            blk.block_idx,
+            blk.state.value,
+            blk.current_len,
+            id(blk.fp16_k),
+            id(blk.fp16_v),
+        )
+
     def update(
         self,
         key_states: torch.Tensor,
@@ -445,14 +477,68 @@ class BlockCacheLayer(HFCacheLayerMixin):
     def _materialize(
         self, dtype: torch.dtype
     ) -> tuple[torch.Tensor, torch.Tensor]:
+        if not self.cfg.incremental_materialize:
+            return self._materialize_legacy(dtype)
+
+        if self.table is None:
+            raise RuntimeError("cache layer was not initialized")
+
+        device = self.device
+        if (
+            self._mat_k is not None
+            and self._mat_v is not None
+            and self._mat_dtype == dtype
+            and self._mat_device == device
+        ):
+            new_sig = [self._block_signature(blk) for blk in self.table.blocks]
+            if new_sig == self._mat_sig:
+                return self._mat_k, self._mat_v
+        else:
+            new_sig = [self._block_signature(blk) for blk in self.table.blocks]
+            self._invalidate_materialized_cache()
+
+        if not self.table.blocks:
+            raise RuntimeError("cannot materialize an empty block table")
+
+        p = 0
+        if self._mat_k is not None and self._mat_v is not None:
+            common = min(len(new_sig), len(self._mat_sig))
+            while p < common and new_sig[p] == self._mat_sig[p]:
+                p += 1
+
+        prefix_tokens = sum(blk.current_len for blk in self.table.blocks[:p])
+        parts_k: list[torch.Tensor] = []
+        parts_v: list[torch.Tensor] = []
+        if prefix_tokens and self._mat_k is not None and self._mat_v is not None:
+            parts_k.append(self._mat_k[:, :, :prefix_tokens, :])
+            parts_v.append(self._mat_v[:, :, :prefix_tokens, :])
+
+        for blk in self.table.blocks[p:]:
+            k, v = self._materialize_block(blk, dtype)
+            parts_k.append(k)
+            parts_v.append(v)
+
+        self._mat_k = torch.cat(parts_k, dim=2)
+        self._mat_v = torch.cat(parts_v, dim=2)
+        self._mat_sig = new_sig
+        self._mat_dtype = dtype
+        self._mat_device = device
+        return self._mat_k, self._mat_v
+
+    def _materialize_block(
+        self, blk: KVBlock, dtype: torch.dtype
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        if blk.state == BlockState.COMPRESSED:
+            return self._decompress_block(blk, dtype)
+        return blk.fp16_k.to(dtype), blk.fp16_v.to(dtype)
+
+    def _materialize_legacy(
+        self, dtype: torch.dtype
+    ) -> tuple[torch.Tensor, torch.Tensor]:
         ks: list[torch.Tensor] = []
         vs: list[torch.Tensor] = []
         for blk in self.table.blocks:
-            if blk.state == BlockState.COMPRESSED:
-                k, v = self._decompress_block(blk, dtype)
-            else:
-                k = blk.fp16_k.to(dtype)
-                v = blk.fp16_v.to(dtype)
+            k, v = self._materialize_block(blk, dtype)
             ks.append(k)
             vs.append(v)
         return torch.cat(ks, dim=2), torch.cat(vs, dim=2)
@@ -510,6 +596,7 @@ class BlockCacheLayer(HFCacheLayerMixin):
         if self.table is not None:
             self.table.blocks.clear()
         self._invalidate_decompressed_cache()
+        self._invalidate_materialized_cache()
         self._pending_quant_blocks.clear()
         self._pending_quant_block_ids.clear()
         self.page_backend = None
@@ -521,6 +608,7 @@ class BlockCacheLayer(HFCacheLayerMixin):
         if self.table is None:
             return
         self._invalidate_decompressed_cache()
+        self._invalidate_materialized_cache()
         self._pending_quant_blocks.clear()
         self._pending_quant_block_ids.clear()
         for blk in self.table.blocks:
@@ -544,6 +632,7 @@ class BlockCacheLayer(HFCacheLayerMixin):
         if self.get_seq_length() <= max_length:
             return
         self._invalidate_decompressed_cache()
+        self._invalidate_materialized_cache()
         self._pending_quant_blocks.clear()
         self._pending_quant_block_ids.clear()
 
@@ -583,6 +672,7 @@ class BlockCacheLayer(HFCacheLayerMixin):
         if self.table is None:
             return
         self._invalidate_decompressed_cache()
+        self._invalidate_materialized_cache()
         self._pending_quant_blocks.clear()
         self._pending_quant_block_ids.clear()
         for blk in self.table.blocks:
@@ -603,6 +693,7 @@ class BlockCacheLayer(HFCacheLayerMixin):
         if self.table is None:
             return
         self._invalidate_decompressed_cache()
+        self._invalidate_materialized_cache()
         self._pending_quant_blocks.clear()
         self._pending_quant_block_ids.clear()
         for blk in self.table.blocks:
@@ -670,6 +761,8 @@ class BlockCacheLayer(HFCacheLayerMixin):
         if not state.get("is_initialized", False):
             self.table = None
             self.is_initialized = False
+            self._invalidate_decompressed_cache()
+            self._invalidate_materialized_cache()
             return
 
         table_state = state["table"]
@@ -688,6 +781,7 @@ class BlockCacheLayer(HFCacheLayerMixin):
                         break
 
         self._invalidate_decompressed_cache()
+        self._invalidate_materialized_cache()
         self._init_runtime(
             batch_size=int(table_state["batch_size"]),
             n_kv_heads=int(table_state["n_kv_heads"]),

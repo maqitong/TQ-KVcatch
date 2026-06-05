@@ -136,6 +136,34 @@ def test_block_kv_cache_update_returns_full_history():
     print("ok: test_block_kv_cache_update_returns_full_history")
 
 
+def test_incremental_materialize_matches_legacy_path():
+    common = dict(
+        block_size=4,
+        key_bits=8,
+        value_bits=8,
+        policy=HybridPolicy(sink_size=4, window_size=4),
+        quant_backend="turboquant",
+    )
+    inc = BlockKVCache(BlockCacheConfig(**common, incremental_materialize=True))
+    legacy = BlockKVCache(BlockCacheConfig(**common, incremental_materialize=False))
+
+    g = torch.Generator().manual_seed(123)
+    for n_new in [3, 3, 2, 1, 4, 1, 1]:
+        k = torch.randn(1, 2, n_new, 8, generator=g).half()
+        v = torch.randn(1, 2, n_new, 8, generator=g).half()
+        inc_k, inc_v = inc.update(k, v, layer_idx=0)
+        legacy_k, legacy_v = legacy.update(k, v, layer_idx=0)
+        assert torch.allclose(inc_k, legacy_k, atol=0, rtol=0)
+        assert torch.allclose(inc_v, legacy_v, atol=0, rtol=0)
+
+    layer = inc.layers[0]
+    assert layer._mat_k is not None
+    same_k, same_v = layer._materialize(dtype=torch.float16)
+    assert same_k is layer._mat_k
+    assert same_v is layer._mat_v
+    print("ok: test_incremental_materialize_matches_legacy_path")
+
+
 def test_block_kv_cache_window_policy_memory_drops():
     # Long-ish sequence so most tokens roll out of window
     cache = BlockKVCache(BlockCacheConfig(
@@ -743,6 +771,7 @@ def main():
     test_per_vector_compress_decompress_roundtrip()
     test_per_block_compress_decompress_roundtrip()
     test_block_kv_cache_update_returns_full_history()
+    test_incremental_materialize_matches_legacy_path()
     test_block_kv_cache_window_policy_memory_drops()
     test_block_kv_cache_per_layer_independence()
     test_reorder_cache_permutes_batch()

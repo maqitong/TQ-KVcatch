@@ -567,6 +567,12 @@ def main() -> None:
     parser.add_argument("--reorder-file", default=None)
     parser.add_argument("--max-cached-decompressed-blocks", type=int, default=0)
     parser.add_argument(
+        "--incremental-materialize",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Cache the dense materialized KV prefix and rebuild only changed suffix blocks.",
+    )
+    parser.add_argument(
         "--quant-budget-per-update",
         type=_parse_optional_int,
         default=None,

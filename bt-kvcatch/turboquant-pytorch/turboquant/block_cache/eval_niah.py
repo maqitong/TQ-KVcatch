@@ -332,6 +332,7 @@ def run_case(model, tokenizer, args, backend: str, context_length: int, position
             "key_group_size": args.key_group_size,
             "value_group_size": args.value_group_size,
             "max_cached_decompressed_blocks": args.max_cached_decompressed_blocks,
+            "incremental_materialize": args.incremental_materialize,
             "quant_budget_per_update": args.quant_budget_per_update,
             "attention_feedback": _needs_attention_feedback(args, cache),
         },
@@ -445,6 +446,12 @@ def main() -> None:
     parser.add_argument("--clipping", type=float, default=0.92)
     parser.add_argument("--reorder-file", default=None)
     parser.add_argument("--max-cached-decompressed-blocks", type=int, default=0)
+    parser.add_argument(
+        "--incremental-materialize",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Cache the dense materialized KV prefix and rebuild only changed suffix blocks.",
+    )
     parser.add_argument(
         "--quant-budget-per-update",
         type=_parse_optional_int,

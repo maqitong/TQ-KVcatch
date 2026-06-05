@@ -149,6 +149,9 @@ def _base_args(cli_args, config: dict[str, Any]) -> SimpleNamespace:
         "max_cached_decompressed_blocks": config.get(
             "max_cached_decompressed_blocks", cli_args.max_cached_decompressed_blocks
         ),
+        "incremental_materialize": config.get(
+            "incremental_materialize", cli_args.incremental_materialize
+        ),
         "quant_budget_per_update": config.get(
             "quant_budget_per_update", cli_args.quant_budget_per_update
         ),
@@ -202,6 +205,7 @@ def _write_outputs(rows: list[dict[str, Any]], output_dir: Path) -> None:
         "low_value_bits",
         "key_group_size",
         "value_group_size",
+        "incremental_materialize",
         "quant_budget_per_update",
     ]
     with csv_path.open("w", newline="", encoding="utf-8") as f:
@@ -274,6 +278,12 @@ def main() -> None:
     parser.add_argument("--clipping", type=float, default=0.92)
     parser.add_argument("--reorder-file", default=None)
     parser.add_argument("--max-cached-decompressed-blocks", type=int, default=0)
+    parser.add_argument(
+        "--incremental-materialize",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Cache the dense materialized KV prefix and rebuild only changed suffix blocks.",
+    )
     parser.add_argument(
         "--quant-budget-per-update",
         type=_parse_optional_int,

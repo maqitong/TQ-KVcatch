@@ -37,6 +37,7 @@ class BlockCacheConfig:
     reorder_file: Optional[str] = None
     reorder_meta: Optional[dict[str, Any]] = None
     max_cached_decompressed_blocks: int = 0
+    incremental_materialize: bool = True
     # None keeps the original synchronous behavior. An integer enables a
     # budgeted "quant cursor": ready pages are queued and at most this many
     # pages are compressed per cache update / attention feedback call.
