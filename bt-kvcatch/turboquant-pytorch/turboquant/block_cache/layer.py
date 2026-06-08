@@ -64,6 +64,9 @@ class BlockCacheLayer(HFCacheLayerMixin):
         self._mat_sig: list[tuple[Any, ...]] = []
         self._mat_dtype: Optional[torch.dtype] = None
         self._mat_device: Optional[torch.device] = None
+        self._tq_merge_sig: tuple[tuple[Any, ...], ...] = ()
+        self._tq_merge_k: Optional[dict[str, Any]] = None
+        self._tq_merge_v: Optional[dict[str, Any]] = None
         self._pending_quant_blocks: deque[int] = deque()
         self._pending_quant_block_ids: set[int] = set()
         self.dtype: Optional[torch.dtype] = None
@@ -326,6 +329,10 @@ class BlockCacheLayer(HFCacheLayerMixin):
             split_v = self._split_turboquant_compressed(cv_all, lengths)
             for blk, ck, cv in zip(group, split_k, split_v):
                 self._finalize_compressed_block(blk, ck, cv)
+            if self._can_batch_turboquant_materialize():
+                self._tq_merge_sig = tuple(self._block_signature(blk) for blk in group)
+                self._tq_merge_k = ck_all
+                self._tq_merge_v = cv_all
         return True
 
     @staticmethod
@@ -482,6 +489,11 @@ class BlockCacheLayer(HFCacheLayerMixin):
         self._mat_dtype = None
         self._mat_device = None
 
+    def _invalidate_turboquant_merge_cache(self) -> None:
+        self._tq_merge_sig = ()
+        self._tq_merge_k = None
+        self._tq_merge_v = None
+
     def _block_signature(self, blk: KVBlock) -> tuple[Any, ...]:
         if blk.state == BlockState.COMPRESSED:
             return (
@@ -606,12 +618,7 @@ class BlockCacheLayer(HFCacheLayerMixin):
         first = blocks[0]
         k_bits = first.key_bits if first.key_bits is not None else self.cfg.key_bits
         v_bits = first.value_bits if first.value_bits is not None else self.cfg.value_bits
-        merged_k = self._merge_turboquant_compressed(
-            [blk.compressed_k for blk in blocks]
-        )
-        merged_v = self._merge_turboquant_compressed(
-            [blk.compressed_v for blk in blocks]
-        )
+        merged_k, merged_v = self._merged_turboquant_group(blocks)
         return self.page_backend.decompress(
             merged_k,
             merged_v,
@@ -619,6 +626,46 @@ class BlockCacheLayer(HFCacheLayerMixin):
             value_bits=v_bits,
             dtype=dtype,
         )
+
+    def _merged_turboquant_group(
+        self, blocks: list[KVBlock]
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
+        group_sig = tuple(self._block_signature(blk) for blk in blocks)
+        if (
+            group_sig == self._tq_merge_sig
+            and self._tq_merge_k is not None
+            and self._tq_merge_v is not None
+        ):
+            return self._tq_merge_k, self._tq_merge_v
+
+        prefix_len = len(self._tq_merge_sig)
+        can_extend = (
+            prefix_len > 0
+            and prefix_len < len(group_sig)
+            and group_sig[:prefix_len] == self._tq_merge_sig
+            and self._tq_merge_k is not None
+            and self._tq_merge_v is not None
+        )
+        if can_extend:
+            tail = blocks[prefix_len:]
+            merged_k = self._merge_turboquant_compressed(
+                [self._tq_merge_k] + [blk.compressed_k for blk in tail]
+            )
+            merged_v = self._merge_turboquant_compressed(
+                [self._tq_merge_v] + [blk.compressed_v for blk in tail]
+            )
+        else:
+            merged_k = self._merge_turboquant_compressed(
+                [blk.compressed_k for blk in blocks]
+            )
+            merged_v = self._merge_turboquant_compressed(
+                [blk.compressed_v for blk in blocks]
+            )
+
+        self._tq_merge_sig = group_sig
+        self._tq_merge_k = merged_k
+        self._tq_merge_v = merged_v
+        return merged_k, merged_v
 
     def _materialize_blocks(
         self, blocks: list[KVBlock], dtype: torch.dtype
@@ -790,8 +837,10 @@ class BlockCacheLayer(HFCacheLayerMixin):
     def reset(self) -> None:
         if self.table is not None:
             self.table.blocks.clear()
+            self.table._total_len = 0
         self._invalidate_decompressed_cache()
         self._invalidate_materialized_cache()
+        self._invalidate_turboquant_merge_cache()
         self._pending_quant_blocks.clear()
         self._pending_quant_block_ids.clear()
         self.page_backend = None
@@ -804,6 +853,7 @@ class BlockCacheLayer(HFCacheLayerMixin):
             return
         self._invalidate_decompressed_cache()
         self._invalidate_materialized_cache()
+        self._invalidate_turboquant_merge_cache()
         self._pending_quant_blocks.clear()
         self._pending_quant_block_ids.clear()
         for blk in self.table.blocks:
@@ -828,6 +878,7 @@ class BlockCacheLayer(HFCacheLayerMixin):
             return
         self._invalidate_decompressed_cache()
         self._invalidate_materialized_cache()
+        self._invalidate_turboquant_merge_cache()
         self._pending_quant_blocks.clear()
         self._pending_quant_block_ids.clear()
 
@@ -862,12 +913,14 @@ class BlockCacheLayer(HFCacheLayerMixin):
             kept.append(blk)
             break
         self.table.blocks = kept
+        self.table._total_len = sum(blk.current_len for blk in kept)
 
     def batch_repeat_interleave(self, repeats: int) -> None:
         if self.table is None:
             return
         self._invalidate_decompressed_cache()
         self._invalidate_materialized_cache()
+        self._invalidate_turboquant_merge_cache()
         self._pending_quant_blocks.clear()
         self._pending_quant_block_ids.clear()
         for blk in self.table.blocks:
@@ -889,6 +942,7 @@ class BlockCacheLayer(HFCacheLayerMixin):
             return
         self._invalidate_decompressed_cache()
         self._invalidate_materialized_cache()
+        self._invalidate_turboquant_merge_cache()
         self._pending_quant_blocks.clear()
         self._pending_quant_block_ids.clear()
         for blk in self.table.blocks:
@@ -958,6 +1012,7 @@ class BlockCacheLayer(HFCacheLayerMixin):
             self.is_initialized = False
             self._invalidate_decompressed_cache()
             self._invalidate_materialized_cache()
+            self._invalidate_turboquant_merge_cache()
             return
 
         table_state = state["table"]
@@ -977,6 +1032,7 @@ class BlockCacheLayer(HFCacheLayerMixin):
 
         self._invalidate_decompressed_cache()
         self._invalidate_materialized_cache()
+        self._invalidate_turboquant_merge_cache()
         self._init_runtime(
             batch_size=int(table_state["batch_size"]),
             n_kv_heads=int(table_state["n_kv_heads"]),
@@ -1005,6 +1061,7 @@ class BlockCacheLayer(HFCacheLayerMixin):
                 page_meta=block_state.get("page_meta"),
             )
             self.table.blocks.append(blk)
+        self.table._total_len = sum(blk.current_len for blk in self.table.blocks)
 
         pending = []
         for block_idx in state.get("pending_quant_blocks", []):

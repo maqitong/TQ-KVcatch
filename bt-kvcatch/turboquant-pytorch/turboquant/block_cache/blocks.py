@@ -132,10 +132,11 @@ class BlockTable:
         self.n_kv_heads = n_kv_heads
         self.batch_size = batch_size
         self.blocks: list[KVBlock] = []
+        self._total_len = 0
 
     @property
     def total_len(self) -> int:
-        return sum(b.current_len for b in self.blocks)
+        return self._total_len
 
     def _new_block(self) -> KVBlock:
         blk = KVBlock(
@@ -153,6 +154,7 @@ class BlockTable:
     ) -> list[KVBlock]:
         """Append (B, H, n, D). Returns blocks newly SEALED by this call."""
         sealed: list[KVBlock] = []
+        n_appended = int(k.shape[2])
         cur: Optional[KVBlock] = (
             self.blocks[-1]
             if self.blocks and self.blocks[-1].state == BlockState.FILLING
@@ -167,6 +169,7 @@ class BlockTable:
             if cur.state == BlockState.SEALED:
                 sealed.append(cur)
                 cur = None
+        self._total_len += n_appended
         return sealed
 
     def memory_bytes(self) -> int:
