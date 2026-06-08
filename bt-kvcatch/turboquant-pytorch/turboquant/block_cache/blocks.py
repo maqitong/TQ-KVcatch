@@ -76,8 +76,8 @@ class KVBlock:
             overflow_v = v[:, :, capacity:, :]
 
         if self.fp16_k is None:
-            self.fp16_k = take_k.contiguous()
-            self.fp16_v = take_v.contiguous()
+            self.fp16_k = take_k
+            self.fp16_v = take_v
         else:
             self.fp16_k = torch.cat([self.fp16_k, take_k], dim=2)
             self.fp16_v = torch.cat([self.fp16_v, take_v], dim=2)

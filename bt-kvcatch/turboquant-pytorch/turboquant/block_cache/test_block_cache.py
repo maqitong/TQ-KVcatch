@@ -223,42 +223,58 @@ def test_turboquant_batched_materialize_matches_blockwise_path():
     print("ok: test_turboquant_batched_materialize_matches_blockwise_path")
 
 
-def test_turboquant_materialize_reuses_merged_payload_cache():
+def test_live_fp16_blocks_are_compacted_after_prefill():
+    cache = BlockKVCache(BlockCacheConfig(
+        block_size=4,
+        key_bits=8,
+        value_bits=8,
+        policy=WindowBlockPolicy(window_size=4),
+        quant_backend="turboquant",
+        incremental_materialize=False,
+        max_cached_decompressed_blocks=0,
+    ))
+    k, v = _kv(1, 2, 12, 8)
+    full_k, full_v = cache.update(k, v, layer_idx=0)
+    layer = cache.layers[0]
+    blocks = layer.table.blocks
+
+    assert full_k.shape == (1, 2, 12, 8)
+    assert full_v.shape == (1, 2, 12, 8)
+    assert [blk.state for blk in blocks] == [
+        BlockState.COMPRESSED,
+        BlockState.COMPRESSED,
+        BlockState.SEALED,
+    ]
+    assert all(blk.fp16_k is None for blk in blocks[:2])
+    assert blocks[2].fp16_k.is_contiguous()
+    assert blocks[2].fp16_v.is_contiguous()
+    print("ok: test_live_fp16_blocks_are_compacted_after_prefill")
+
+
+def test_block_table_total_len_tracks_crop_reset_and_restore():
     cache = BlockKVCache(BlockCacheConfig(
         block_size=4,
         key_bits=8,
         value_bits=8,
         policy=TokenBlockPolicy(),
         quant_backend="turboquant",
-        incremental_materialize=False,
-        max_cached_decompressed_blocks=0,
     ))
-    k, v = _kv(1, 2, 8, 8)
-    first_k, first_v = cache.update(k, v, layer_idx=0)
+    k, v = _kv(1, 2, 12, 8)
+    cache.update(k, v, layer_idx=0)
     layer = cache.layers[0]
-    cached_k = layer._tq_merge_k
-    cached_v = layer._tq_merge_v
-    assert cached_k is not None and cached_v is not None
-    assert cached_k["shape"][2] == 8
+    assert layer.table.total_len == 12
 
-    again_k, again_v = layer._materialize(dtype=torch.float16)
-    assert layer._tq_merge_k is cached_k
-    assert layer._tq_merge_v is cached_v
-    assert torch.allclose(again_k, first_k, atol=0, rtol=0)
-    assert torch.allclose(again_v, first_v, atol=0, rtol=0)
+    layer.crop(8)
+    assert layer.table.total_len == 8
 
-    k2, v2 = _kv(1, 2, 4, 8)
-    next_k, next_v = cache.update(k2, v2, layer_idx=0)
-    assert layer._tq_merge_k is not cached_k
-    assert layer._tq_merge_v is not cached_v
-    assert layer._tq_merge_k["shape"][2] == 12
-    assert next_k.shape == (1, 2, 12, 8)
-    assert next_v.shape == (1, 2, 12, 8)
+    restored = BlockKVCache(cache.config)
+    restored.load_state_dict(cache.state_dict())
+    assert restored.layers[0].table.total_len == 8
 
-    layer.reorder_cache(torch.tensor([0]))
-    assert layer._tq_merge_k is None
-    assert layer._tq_merge_v is None
-    print("ok: test_turboquant_materialize_reuses_merged_payload_cache")
+    restored.layers[0].reset()
+    assert restored.layers[0].table.total_len == 0
+    print("ok: test_block_table_total_len_tracks_crop_reset_and_restore")
+
 
 
 def test_block_kv_cache_window_policy_memory_drops():
@@ -871,7 +887,8 @@ def main():
     test_incremental_materialize_matches_legacy_path()
     test_turboquant_batched_compression_matches_single_page_path()
     test_turboquant_batched_materialize_matches_blockwise_path()
-    test_turboquant_materialize_reuses_merged_payload_cache()
+    test_live_fp16_blocks_are_compacted_after_prefill()
+    test_block_table_total_len_tracks_crop_reset_and_restore()
     test_block_kv_cache_window_policy_memory_drops()
     test_block_kv_cache_per_layer_independence()
     test_reorder_cache_permutes_batch()
