@@ -295,7 +295,7 @@ def _block_backend_config(
         clipping=clipping,
         reorder_file=reorder_file,
         max_cached_decompressed_blocks=args.max_cached_decompressed_blocks,
-        incremental_materialize=getattr(args, "incremental_materialize", True),
+        incremental_materialize=getattr(args, "incremental_materialize", False),
         quant_budget_per_update=getattr(args, "quant_budget_per_update", None),
     )
     paper_baseline = (
@@ -435,7 +435,7 @@ def cache_factory_for_method(args: Any, method: MethodSpec) -> Callable[[], Any]
             clipping=clipping,
             reorder_file=reorder_file,
             max_cached_decompressed_blocks=args.max_cached_decompressed_blocks,
-            incremental_materialize=getattr(args, "incremental_materialize", True),
+            incremental_materialize=getattr(args, "incremental_materialize", False),
             quant_budget_per_update=getattr(args, "quant_budget_per_update", None),
         )
         return BlockKVCache(cfg)
@@ -527,7 +527,7 @@ def backend_config(args: Any, backend: str) -> dict[str, Any]:
         "key_group_size": args.key_group_size,
         "value_group_size": args.value_group_size,
         "max_cached_decompressed_blocks": args.max_cached_decompressed_blocks,
-        "incremental_materialize": getattr(args, "incremental_materialize", True),
+        "incremental_materialize": getattr(args, "incremental_materialize", False),
         "quant_budget_per_update": getattr(args, "quant_budget_per_update", None),
         "integration": "turboquant-pytorch/BlockKVCache",
     }
@@ -621,6 +621,6 @@ def method_config(args: Any, method: MethodSpec) -> dict[str, Any]:
         "key_group_size": args.key_group_size,
         "value_group_size": args.value_group_size,
         "max_cached_decompressed_blocks": args.max_cached_decompressed_blocks,
-        "incremental_materialize": getattr(args, "incremental_materialize", True),
+        "incremental_materialize": getattr(args, "incremental_materialize", False),
         "quant_budget_per_update": getattr(args, "quant_budget_per_update", None),
     }

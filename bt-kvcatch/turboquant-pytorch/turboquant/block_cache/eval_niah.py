@@ -449,7 +449,7 @@ def main() -> None:
     parser.add_argument(
         "--incremental-materialize",
         action=argparse.BooleanOptionalAction,
-        default=True,
+        default=False,
         help="Cache the dense materialized KV prefix and rebuild only changed suffix blocks.",
     )
     parser.add_argument(

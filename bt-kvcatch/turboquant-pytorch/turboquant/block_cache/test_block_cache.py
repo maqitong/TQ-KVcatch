@@ -164,6 +164,38 @@ def test_incremental_materialize_matches_legacy_path():
     print("ok: test_incremental_materialize_matches_legacy_path")
 
 
+def test_turboquant_batched_compression_matches_single_page_path():
+    cfg = BlockCacheConfig(
+        block_size=4,
+        key_bits=8,
+        value_bits=8,
+        policy=TokenBlockPolicy(),
+        quant_backend="turboquant",
+        incremental_materialize=False,
+    )
+    batched = BlockKVCache(cfg)
+    single = BlockKVCache(cfg)
+
+    k, v = _kv(1, 2, 12, 8)
+    batched_k, batched_v = batched.update(k, v, layer_idx=0)
+    single_parts_k = []
+    single_parts_v = []
+    for start in range(0, 12, 4):
+        out_k, out_v = single.update(
+            k[:, :, start : start + 4, :],
+            v[:, :, start : start + 4, :],
+            layer_idx=0,
+        )
+        single_parts_k.append(out_k)
+        single_parts_v.append(out_v)
+
+    assert torch.allclose(batched_k, single_parts_k[-1], atol=0, rtol=0)
+    assert torch.allclose(batched_v, single_parts_v[-1], atol=0, rtol=0)
+    assert all(b.state == BlockState.COMPRESSED for b in batched.layers[0].table.blocks)
+    assert all(b.state == BlockState.COMPRESSED for b in single.layers[0].table.blocks)
+    print("ok: test_turboquant_batched_compression_matches_single_page_path")
+
+
 def test_block_kv_cache_window_policy_memory_drops():
     # Long-ish sequence so most tokens roll out of window
     cache = BlockKVCache(BlockCacheConfig(
@@ -772,6 +804,7 @@ def main():
     test_per_block_compress_decompress_roundtrip()
     test_block_kv_cache_update_returns_full_history()
     test_incremental_materialize_matches_legacy_path()
+    test_turboquant_batched_compression_matches_single_page_path()
     test_block_kv_cache_window_policy_memory_drops()
     test_block_kv_cache_per_layer_independence()
     test_reorder_cache_permutes_batch()

@@ -249,6 +249,7 @@ class BlockCacheLayer(HFCacheLayerMixin):
             bit_assignments = self.bit_allocator.assign_many(
                 blocks, self.table, self.layer_idx
             )
+        prepared: list[tuple[KVBlock, float, float]] = []
         for blk in blocks:
             if blk.state != BlockState.SEALED:
                 continue
@@ -256,6 +257,12 @@ class BlockCacheLayer(HFCacheLayerMixin):
             k_bits, v_bits = self._apply_layer_protection(blk, k_bits, v_bits)
             blk.key_bits = k_bits
             blk.value_bits = v_bits
+            prepared.append((blk, k_bits, v_bits))
+
+        if self._try_compress_turboquant_batched(prepared):
+            return
+
+        for blk, k_bits, v_bits in prepared:
             ck, cv = self.page_backend.compress(
                 blk.fp16_k,
                 blk.fp16_v,
@@ -263,12 +270,84 @@ class BlockCacheLayer(HFCacheLayerMixin):
                 value_bits=v_bits,
                 layer_idx=self.layer_idx,
             )
-            blk.to_compressed(ck, cv)
-            meta = dict(blk.page_meta) if isinstance(blk.page_meta, dict) else {}
-            meta["quant_status"] = "compressed"
-            meta.pop("defer_reason", None)
-            blk.page_meta = meta
-            self._invalidate_decompressed_cache(blk.block_idx)
+            self._finalize_compressed_block(blk, ck, cv)
+
+    def _finalize_compressed_block(
+        self,
+        blk: KVBlock,
+        compressed_k: dict[str, Any],
+        compressed_v: dict[str, Any],
+    ) -> None:
+        blk.to_compressed(compressed_k, compressed_v)
+        meta = dict(blk.page_meta) if isinstance(blk.page_meta, dict) else {}
+        meta["quant_status"] = "compressed"
+        meta.pop("defer_reason", None)
+        blk.page_meta = meta
+        self._invalidate_decompressed_cache(blk.block_idx)
+
+    def _try_compress_turboquant_batched(
+        self, prepared: list[tuple[KVBlock, float, float]]
+    ) -> bool:
+        if not prepared:
+            return True
+        if not isinstance(self.page_backend, TurboQuantPageBackend):
+            return False
+        if self.cfg.granularity != "per-vector":
+            return False
+
+        groups: dict[tuple[float, float], list[KVBlock]] = {}
+        for blk, k_bits, v_bits in prepared:
+            groups.setdefault((float(k_bits), float(v_bits)), []).append(blk)
+
+        for (k_bits, v_bits), group in groups.items():
+            if len(group) == 1:
+                blk = group[0]
+                ck, cv = self.page_backend.compress(
+                    blk.fp16_k,
+                    blk.fp16_v,
+                    key_bits=k_bits,
+                    value_bits=v_bits,
+                    layer_idx=self.layer_idx,
+                )
+                self._finalize_compressed_block(blk, ck, cv)
+                continue
+
+            lengths = [blk.current_len for blk in group]
+            batched_k = torch.cat([blk.fp16_k for blk in group], dim=2)
+            batched_v = torch.cat([blk.fp16_v for blk in group], dim=2)
+            ck_all, cv_all = self.page_backend.compress(
+                batched_k,
+                batched_v,
+                key_bits=k_bits,
+                value_bits=v_bits,
+                layer_idx=self.layer_idx,
+            )
+            split_k = self._split_turboquant_compressed(ck_all, lengths)
+            split_v = self._split_turboquant_compressed(cv_all, lengths)
+            for blk, ck, cv in zip(group, split_k, split_v):
+                self._finalize_compressed_block(blk, ck, cv)
+        return True
+
+    @staticmethod
+    def _split_turboquant_compressed(
+        compressed: dict[str, Any], lengths: list[int]
+    ) -> list[dict[str, Any]]:
+        B, H, _S, D = compressed["shape"]
+        out: list[dict[str, Any]] = []
+        start = 0
+        for length in lengths:
+            end = start + length
+            part: dict[str, Any] = {}
+            for key, value in compressed.items():
+                if key == "shape":
+                    part[key] = (B, H, length, D)
+                elif torch.is_tensor(value) and value.ndim >= 3 and value.shape[2] == _S:
+                    part[key] = value[:, :, start:end, ...]
+                else:
+                    part[key] = value
+            out.append(part)
+            start = end
+        return out
 
     def _step_pending_quantization(self) -> None:
         budget = self.cfg.quant_budget_per_update
