@@ -44,6 +44,8 @@ class KVBlock:
     fp16_v: Optional[torch.Tensor] = None
     compressed_k: Optional[dict] = None
     compressed_v: Optional[dict] = None
+    compressed_run_id: Optional[int] = None
+    compressed_run_start: int = 0
 
     importance: float = 0.0  # page-level score used by mixed precision
     key_bits: Optional[float] = None
@@ -76,8 +78,8 @@ class KVBlock:
             overflow_v = v[:, :, capacity:, :]
 
         if self.fp16_k is None:
-            self.fp16_k = take_k
-            self.fp16_v = take_v
+            self.fp16_k = take_k.contiguous()
+            self.fp16_v = take_v.contiguous()
         else:
             self.fp16_k = torch.cat([self.fp16_k, take_k], dim=2)
             self.fp16_v = torch.cat([self.fp16_v, take_v], dim=2)
@@ -94,6 +96,8 @@ class KVBlock:
             )
         self.compressed_k = compressed_k
         self.compressed_v = compressed_v
+        self.compressed_run_id = compressed_k.get("__run_id")
+        self.compressed_run_start = int(compressed_k.get("__run_start", 0))
         self.fp16_k = None
         self.fp16_v = None
         self.state = BlockState.COMPRESSED

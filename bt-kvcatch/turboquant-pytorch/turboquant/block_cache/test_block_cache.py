@@ -193,6 +193,13 @@ def test_turboquant_batched_compression_matches_single_page_path():
     assert torch.allclose(batched_v, single_parts_v[-1], atol=0, rtol=0)
     assert all(b.state == BlockState.COMPRESSED for b in batched.layers[0].table.blocks)
     assert all(b.state == BlockState.COMPRESSED for b in single.layers[0].table.blocks)
+    assert len(batched.layers[0]._tq_compressed_runs) == 1
+    assert all("__run_id" in b.compressed_k for b in batched.layers[0].table.blocks)
+    assert not any(
+        torch.is_tensor(value)
+        for b in batched.layers[0].table.blocks
+        for value in b.compressed_k.values()
+    )
     print("ok: test_turboquant_batched_compression_matches_single_page_path")
 
 
@@ -815,6 +822,9 @@ def test_block_kv_cache_state_dict_roundtrip_and_continue():
 
     assert restored.seen_tokens == cache.seen_tokens
     assert restored.memory_report() == before
+    assert len(restored.layers[0]._tq_compressed_runs) == len(
+        cache.layers[0]._tq_compressed_runs
+    )
     assert torch.allclose(restored_k, full_k, atol=0, rtol=0)
     assert torch.allclose(restored_v, full_v, atol=0, rtol=0)
 

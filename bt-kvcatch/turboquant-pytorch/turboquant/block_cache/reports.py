@@ -59,6 +59,7 @@ def build_memory_report(layers: Iterable[Any]) -> dict[str, Any]:
                 * blk.current_len
                 * layer.table.head_dim
             )
+        compressed_bytes += getattr(layer, "compressed_run_memory_bytes", lambda: 0)()
 
     return {
         "compressed_bytes": compressed_bytes,

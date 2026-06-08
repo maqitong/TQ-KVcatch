@@ -64,6 +64,7 @@ class BlockCacheLayer(HFCacheLayerMixin):
         self._mat_sig: list[tuple[Any, ...]] = []
         self._mat_dtype: Optional[torch.dtype] = None
         self._mat_device: Optional[torch.device] = None
+        self._tq_compressed_runs: list[dict[str, Any]] = []
         self._pending_quant_blocks: deque[int] = deque()
         self._pending_quant_block_ids: set[int] = set()
         self.dtype: Optional[torch.dtype] = None
@@ -322,11 +323,79 @@ class BlockCacheLayer(HFCacheLayerMixin):
                 value_bits=v_bits,
                 layer_idx=self.layer_idx,
             )
-            split_k = self._split_turboquant_compressed(ck_all, lengths)
-            split_v = self._split_turboquant_compressed(cv_all, lengths)
+            if self._can_store_turboquant_runs():
+                split_k, split_v = self._register_turboquant_run(
+                    group, ck_all, cv_all, k_bits, v_bits
+                )
+            else:
+                split_k = self._split_turboquant_compressed(ck_all, lengths)
+                split_v = self._split_turboquant_compressed(cv_all, lengths)
             for blk, ck, cv in zip(group, split_k, split_v):
                 self._finalize_compressed_block(blk, ck, cv)
         return True
+
+    def _can_store_turboquant_runs(self) -> bool:
+        return (
+            isinstance(self.page_backend, TurboQuantPageBackend)
+            and self.cfg.granularity == "per-vector"
+        )
+
+    def _register_turboquant_run(
+        self,
+        blocks: list[KVBlock],
+        compressed_k: dict[str, Any],
+        compressed_v: dict[str, Any],
+        key_bits: float,
+        value_bits: float,
+    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+        run_id = len(self._tq_compressed_runs)
+        lengths = [blk.current_len for blk in blocks]
+        self._tq_compressed_runs.append(
+            {
+                "compressed_k": compressed_k,
+                "compressed_v": compressed_v,
+                "key_bits": float(key_bits),
+                "value_bits": float(value_bits),
+                "block_indices": [blk.block_idx for blk in blocks],
+                "lengths": lengths,
+                "active": True,
+            }
+        )
+
+        split_k: list[dict[str, Any]] = []
+        split_v: list[dict[str, Any]] = []
+        B, H, _S, D = compressed_k["shape"]
+        start = 0
+        for length in lengths:
+            split_k.append(
+                self._turboquant_run_proxy(compressed_k, run_id, start, length, B, H, D)
+            )
+            split_v.append(
+                self._turboquant_run_proxy(compressed_v, run_id, start, length, B, H, D)
+            )
+            start += length
+        return split_k, split_v
+
+    @staticmethod
+    def _turboquant_run_proxy(
+        compressed: dict[str, Any],
+        run_id: int,
+        start: int,
+        length: int,
+        B: int,
+        H: int,
+        D: int,
+    ) -> dict[str, Any]:
+        return {
+            "backend": compressed.get("backend"),
+            "tq_reordered": compressed.get("tq_reordered", False),
+            "ttype": compressed.get("ttype"),
+            "layer_idx": compressed.get("layer_idx"),
+            "granularity": compressed.get("granularity", "per-vector"),
+            "shape": (B, H, length, D),
+            "__run_id": run_id,
+            "__run_start": start,
+        }
 
     @staticmethod
     def _split_turboquant_compressed(
@@ -520,19 +589,7 @@ class BlockCacheLayer(HFCacheLayerMixin):
         elif self._uses_budgeted_quantization():
             self._step_pending_quantization()
 
-        self._compact_live_fp16_blocks()
         return self._materialize(key_states.dtype)
-
-    def _compact_live_fp16_blocks(self) -> None:
-        if self.table is None:
-            return
-        for blk in self.table.blocks:
-            if blk.state == BlockState.COMPRESSED or blk.fp16_k is None:
-                continue
-            if not blk.fp16_k.is_contiguous():
-                blk.fp16_k = blk.fp16_k.contiguous()
-            if blk.fp16_v is not None and not blk.fp16_v.is_contiguous():
-                blk.fp16_v = blk.fp16_v.contiguous()
 
     def _decompress_block(
         self, blk: KVBlock, dtype: torch.dtype
@@ -551,9 +608,10 @@ class BlockCacheLayer(HFCacheLayerMixin):
 
         k_bits = blk.key_bits if blk.key_bits is not None else self.cfg.key_bits
         v_bits = blk.value_bits if blk.value_bits is not None else self.cfg.value_bits
+        compressed_k, compressed_v = self._compressed_payload_for_block(blk)
         k, v = self.page_backend.decompress(
-            blk.compressed_k,
-            blk.compressed_v,
+            compressed_k,
+            compressed_v,
             key_bits=k_bits,
             value_bits=v_bits,
             dtype=dtype,
@@ -564,6 +622,39 @@ class BlockCacheLayer(HFCacheLayerMixin):
             while len(self._decompressed_cache) > self.cfg.max_cached_decompressed_blocks:
                 self._decompressed_cache.popitem(last=False)
         return k, v
+
+    def _compressed_payload_for_block(
+        self, blk: KVBlock
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
+        if not isinstance(blk.compressed_k, dict) or "__run_id" not in blk.compressed_k:
+            return blk.compressed_k, blk.compressed_v
+
+        run_id = int(blk.compressed_k["__run_id"])
+        start = int(blk.compressed_k.get("__run_start", 0))
+        length = int(blk.current_len)
+        run = self._tq_compressed_runs[run_id]
+        if not run.get("active", True):
+            raise RuntimeError(f"compressed run {run_id} is inactive")
+        return (
+            self._slice_turboquant_compressed(run["compressed_k"], start, length),
+            self._slice_turboquant_compressed(run["compressed_v"], start, length),
+        )
+
+    @staticmethod
+    def _slice_turboquant_compressed(
+        compressed: dict[str, Any], start: int, length: int
+    ) -> dict[str, Any]:
+        B, H, _S, D = compressed["shape"]
+        end = start + length
+        part: dict[str, Any] = {}
+        for key, value in compressed.items():
+            if key == "shape":
+                part[key] = (B, H, length, D)
+            elif torch.is_tensor(value) and value.ndim >= 3 and value.shape[2] == _S:
+                part[key] = value[:, :, start:end, ...]
+            else:
+                part[key] = value
+        return part
 
     def _can_batch_turboquant_materialize(self) -> bool:
         return (
@@ -618,12 +709,14 @@ class BlockCacheLayer(HFCacheLayerMixin):
         first = blocks[0]
         k_bits = first.key_bits if first.key_bits is not None else self.cfg.key_bits
         v_bits = first.value_bits if first.value_bits is not None else self.cfg.value_bits
-        merged_k = self._merge_turboquant_compressed(
-            [blk.compressed_k for blk in blocks]
-        )
-        merged_v = self._merge_turboquant_compressed(
-            [blk.compressed_v for blk in blocks]
-        )
+        run = self._turboquant_run_for_group(blocks)
+        if run is not None:
+            merged_k = run["compressed_k"]
+            merged_v = run["compressed_v"]
+        else:
+            payloads = [self._compressed_payload_for_block(blk) for blk in blocks]
+            merged_k = self._merge_turboquant_compressed([p[0] for p in payloads])
+            merged_v = self._merge_turboquant_compressed([p[1] for p in payloads])
         return self.page_backend.decompress(
             merged_k,
             merged_v,
@@ -631,6 +724,31 @@ class BlockCacheLayer(HFCacheLayerMixin):
             value_bits=v_bits,
             dtype=dtype,
         )
+
+    def _turboquant_run_for_group(
+        self, blocks: list[KVBlock]
+    ) -> Optional[dict[str, Any]]:
+        if not blocks:
+            return None
+        first_meta = blocks[0].compressed_k
+        if not isinstance(first_meta, dict) or "__run_id" not in first_meta:
+            return None
+        run_id = int(first_meta["__run_id"])
+        expected_start = int(first_meta.get("__run_start", 0))
+        total_len = 0
+        for blk in blocks:
+            meta = blk.compressed_k
+            if not isinstance(meta, dict) or int(meta.get("__run_id", -1)) != run_id:
+                return None
+            if int(meta.get("__run_start", -1)) != expected_start + total_len:
+                return None
+            total_len += blk.current_len
+        run = self._tq_compressed_runs[run_id]
+        if not run.get("active", True):
+            return None
+        if expected_start != 0 or total_len != int(run["compressed_k"]["shape"][2]):
+            return None
+        return run
 
     def _materialize_blocks(
         self, blocks: list[KVBlock], dtype: torch.dtype
@@ -643,28 +761,34 @@ class BlockCacheLayer(HFCacheLayerMixin):
         ks: list[torch.Tensor] = []
         vs: list[torch.Tensor] = []
         group: list[KVBlock] = []
-        group_bits: Optional[tuple[float, float]] = None
+        group_key: Optional[tuple[float, float, Optional[int]]] = None
 
         def flush_group() -> None:
-            nonlocal group, group_bits
+            nonlocal group, group_key
             if not group:
                 return
             k, v = self._decompress_turboquant_group(group, dtype)
             ks.append(k)
             vs.append(v)
             group = []
-            group_bits = None
+            group_key = None
 
         for blk in blocks:
             if self._is_turboquant_compressed_block(blk):
-                bits = (
+                key = (
                     float(blk.key_bits if blk.key_bits is not None else self.cfg.key_bits),
                     float(blk.value_bits if blk.value_bits is not None else self.cfg.value_bits),
+                    (
+                        int(blk.compressed_k["__run_id"])
+                        if isinstance(blk.compressed_k, dict)
+                        and "__run_id" in blk.compressed_k
+                        else None
+                    ),
                 )
-                if group and bits != group_bits:
+                if group and key != group_key:
                     flush_group()
                 group.append(blk)
-                group_bits = bits
+                group_key = key
                 continue
 
             flush_group()
@@ -799,12 +923,25 @@ class BlockCacheLayer(HFCacheLayerMixin):
     def get_max_cache_shape(self) -> int:
         return -1
 
+    def _compressed_payload_dicts(self) -> list[dict[str, Any]]:
+        payloads: list[dict[str, Any]] = []
+        for run in self._tq_compressed_runs:
+            if run.get("active", True):
+                payloads.extend([run["compressed_k"], run["compressed_v"]])
+        if self.table is not None:
+            for blk in self.table.blocks:
+                for d in (blk.compressed_k, blk.compressed_v):
+                    if isinstance(d, dict) and "__run_id" not in d:
+                        payloads.append(d)
+        return payloads
+
     def reset(self) -> None:
         if self.table is not None:
             self.table.blocks.clear()
             self.table._total_len = 0
         self._invalidate_decompressed_cache()
         self._invalidate_materialized_cache()
+        self._tq_compressed_runs.clear()
         self._pending_quant_blocks.clear()
         self._pending_quant_block_ids.clear()
         self.page_backend = None
@@ -823,14 +960,12 @@ class BlockCacheLayer(HFCacheLayerMixin):
             if blk.fp16_k is not None:
                 blk.fp16_k = blk.fp16_k.index_select(0, beam_idx.to(blk.fp16_k.device))
                 blk.fp16_v = blk.fp16_v.index_select(0, beam_idx.to(blk.fp16_v.device))
-            for d in (blk.compressed_k, blk.compressed_v):
-                if d is None:
-                    continue
-                for k_, val in list(d.items()):
-                    if torch.is_tensor(val) and val.shape[:1] == (
-                        self.table.batch_size,
-                    ):
-                        d[k_] = val.index_select(0, beam_idx.to(val.device))
+        for d in self._compressed_payload_dicts():
+            for k_, val in list(d.items()):
+                if torch.is_tensor(val) and val.shape[:1] == (
+                    self.table.batch_size,
+                ):
+                    d[k_] = val.index_select(0, beam_idx.to(val.device))
 
     def crop(self, max_length: int) -> None:
         if self.table is None:
@@ -888,14 +1023,15 @@ class BlockCacheLayer(HFCacheLayerMixin):
             if blk.fp16_k is not None:
                 blk.fp16_k = blk.fp16_k.repeat_interleave(repeats, dim=0)
                 blk.fp16_v = blk.fp16_v.repeat_interleave(repeats, dim=0)
-            for d in (blk.compressed_k, blk.compressed_v):
-                if d is None:
-                    continue
-                for k_, val in list(d.items()):
-                    if torch.is_tensor(val) and val.shape[:1] == (
-                        self.table.batch_size,
-                    ):
-                        d[k_] = val.repeat_interleave(repeats, dim=0)
+        for d in self._compressed_payload_dicts():
+            for k_, val in list(d.items()):
+                if torch.is_tensor(val) and val.shape[:1] == (
+                    self.table.batch_size,
+                ):
+                    d[k_] = val.repeat_interleave(repeats, dim=0)
+            if "shape" in d:
+                B, H, S, D = d["shape"]
+                d["shape"] = (int(B) * repeats, H, S, D)
         self.table.batch_size *= repeats
 
     def batch_select_indices(self, indices: torch.Tensor) -> None:
@@ -909,18 +1045,32 @@ class BlockCacheLayer(HFCacheLayerMixin):
             if blk.fp16_k is not None:
                 blk.fp16_k = blk.fp16_k[indices]
                 blk.fp16_v = blk.fp16_v[indices]
-            for d in (blk.compressed_k, blk.compressed_v):
-                if d is None:
-                    continue
-                for k_, val in list(d.items()):
-                    if torch.is_tensor(val) and val.shape[:1] == (
-                        self.table.batch_size,
-                    ):
-                        d[k_] = val[indices]
+        for d in self._compressed_payload_dicts():
+            for k_, val in list(d.items()):
+                if torch.is_tensor(val) and val.shape[:1] == (
+                    self.table.batch_size,
+                ):
+                    d[k_] = val[indices]
+            if "shape" in d:
+                _B, H, S, D = d["shape"]
+                d["shape"] = (int(indices.shape[0]), H, S, D)
         self.table.batch_size = int(indices.shape[0])
 
     def memory_bytes(self) -> int:
-        return self.table.memory_bytes() if self.table is not None else 0
+        if self.table is None:
+            return 0
+        return self.table.memory_bytes() + self.compressed_run_memory_bytes()
+
+    def compressed_run_memory_bytes(self) -> int:
+        n = 0
+        for run in self._tq_compressed_runs:
+            if not run.get("active", True):
+                continue
+            for d in (run["compressed_k"], run["compressed_v"]):
+                for value in d.values():
+                    if torch.is_tensor(value):
+                        n += value.numel() * value.element_size()
+        return n
 
     def state_dict(self) -> dict[str, Any]:
         """Serialize one layer's block table and compressed payloads."""
@@ -941,6 +1091,8 @@ class BlockCacheLayer(HFCacheLayerMixin):
                     "fp16_v": blk.fp16_v,
                     "compressed_k": blk.compressed_k,
                     "compressed_v": blk.compressed_v,
+                    "compressed_run_id": blk.compressed_run_id,
+                    "compressed_run_start": blk.compressed_run_start,
                     "importance": blk.importance,
                     "key_bits": blk.key_bits,
                     "value_bits": blk.value_bits,
@@ -955,6 +1107,7 @@ class BlockCacheLayer(HFCacheLayerMixin):
             "device": str(self.device),
             "decompressed_cache_entries": len(self._decompressed_cache),
             "pending_quant_blocks": list(self._pending_quant_blocks),
+            "tq_compressed_runs": self._tq_compressed_runs,
             "table": {
                 "block_size": self.table.block_size,
                 "head_dim": self.table.head_dim,
@@ -988,6 +1141,14 @@ class BlockCacheLayer(HFCacheLayerMixin):
                     if tensor is not None:
                         first_device = tensor.device
                         break
+        for run in state.get("tq_compressed_runs", []):
+            for d in (run.get("compressed_k"), run.get("compressed_v")):
+                if not isinstance(d, dict):
+                    continue
+                tensor = next((v for v in d.values() if torch.is_tensor(v)), None)
+                if tensor is not None:
+                    first_device = tensor.device
+                    break
 
         self._invalidate_decompressed_cache()
         self._invalidate_materialized_cache()
@@ -999,6 +1160,7 @@ class BlockCacheLayer(HFCacheLayerMixin):
             device=first_device,
         )
         self.table.blocks = []
+        self._tq_compressed_runs = list(state.get("tq_compressed_runs", []))
 
         for block_state in table_state.get("blocks", []):
             blk = KVBlock(
@@ -1013,6 +1175,8 @@ class BlockCacheLayer(HFCacheLayerMixin):
                 fp16_v=block_state.get("fp16_v"),
                 compressed_k=block_state.get("compressed_k"),
                 compressed_v=block_state.get("compressed_v"),
+                compressed_run_id=block_state.get("compressed_run_id"),
+                compressed_run_start=int(block_state.get("compressed_run_start", 0)),
                 importance=float(block_state.get("importance", 0.0)),
                 key_bits=block_state.get("key_bits"),
                 value_bits=block_state.get("value_bits"),
