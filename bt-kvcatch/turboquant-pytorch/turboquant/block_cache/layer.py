@@ -553,6 +553,127 @@ class BlockCacheLayer(HFCacheLayerMixin):
                 self._decompressed_cache.popitem(last=False)
         return k, v
 
+    def _can_batch_turboquant_materialize(self) -> bool:
+        return (
+            isinstance(self.page_backend, TurboQuantPageBackend)
+            and self.cfg.granularity == "per-vector"
+            and self.cfg.max_cached_decompressed_blocks <= 0
+        )
+
+    def _is_turboquant_compressed_block(self, blk: KVBlock) -> bool:
+        return (
+            blk.state == BlockState.COMPRESSED
+            and isinstance(blk.compressed_k, dict)
+            and isinstance(blk.compressed_v, dict)
+            and blk.compressed_k.get("backend") == "turboquant"
+            and blk.compressed_v.get("backend") == "turboquant"
+        )
+
+    @staticmethod
+    def _merge_turboquant_compressed(
+        compressed_parts: list[dict[str, Any]]
+    ) -> dict[str, Any]:
+        if not compressed_parts:
+            raise ValueError("cannot merge an empty compressed page list")
+
+        B, H, _S0, D = compressed_parts[0]["shape"]
+        total_s = sum(int(part["shape"][2]) for part in compressed_parts)
+        merged: dict[str, Any] = {}
+        for key, first in compressed_parts[0].items():
+            if key == "shape":
+                merged[key] = (B, H, total_s, D)
+                continue
+            if (
+                torch.is_tensor(first)
+                and first.ndim >= 3
+                and first.shape[2] == _S0
+            ):
+                merged[key] = torch.cat([part[key] for part in compressed_parts], dim=2)
+            else:
+                merged[key] = first
+        return merged
+
+    def _decompress_turboquant_group(
+        self,
+        blocks: list[KVBlock],
+        dtype: torch.dtype,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        if self.page_backend is None:
+            raise RuntimeError("page backend was not initialized")
+        if len(blocks) == 1:
+            return self._decompress_block(blocks[0], dtype)
+
+        first = blocks[0]
+        k_bits = first.key_bits if first.key_bits is not None else self.cfg.key_bits
+        v_bits = first.value_bits if first.value_bits is not None else self.cfg.value_bits
+        merged_k = self._merge_turboquant_compressed(
+            [blk.compressed_k for blk in blocks]
+        )
+        merged_v = self._merge_turboquant_compressed(
+            [blk.compressed_v for blk in blocks]
+        )
+        return self.page_backend.decompress(
+            merged_k,
+            merged_v,
+            key_bits=k_bits,
+            value_bits=v_bits,
+            dtype=dtype,
+        )
+
+    def _materialize_blocks(
+        self, blocks: list[KVBlock], dtype: torch.dtype
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        if not blocks:
+            raise RuntimeError("cannot materialize an empty block list")
+        if not self._can_batch_turboquant_materialize():
+            return self._materialize_blocks_legacy(blocks, dtype)
+
+        ks: list[torch.Tensor] = []
+        vs: list[torch.Tensor] = []
+        group: list[KVBlock] = []
+        group_bits: Optional[tuple[float, float]] = None
+
+        def flush_group() -> None:
+            nonlocal group, group_bits
+            if not group:
+                return
+            k, v = self._decompress_turboquant_group(group, dtype)
+            ks.append(k)
+            vs.append(v)
+            group = []
+            group_bits = None
+
+        for blk in blocks:
+            if self._is_turboquant_compressed_block(blk):
+                bits = (
+                    float(blk.key_bits if blk.key_bits is not None else self.cfg.key_bits),
+                    float(blk.value_bits if blk.value_bits is not None else self.cfg.value_bits),
+                )
+                if group and bits != group_bits:
+                    flush_group()
+                group.append(blk)
+                group_bits = bits
+                continue
+
+            flush_group()
+            k, v = self._materialize_block(blk, dtype)
+            ks.append(k)
+            vs.append(v)
+
+        flush_group()
+        return torch.cat(ks, dim=2), torch.cat(vs, dim=2)
+
+    def _materialize_blocks_legacy(
+        self, blocks: list[KVBlock], dtype: torch.dtype
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        ks: list[torch.Tensor] = []
+        vs: list[torch.Tensor] = []
+        for blk in blocks:
+            k, v = self._materialize_block(blk, dtype)
+            ks.append(k)
+            vs.append(v)
+        return torch.cat(ks, dim=2), torch.cat(vs, dim=2)
+
     def _materialize(
         self, dtype: torch.dtype
     ) -> tuple[torch.Tensor, torch.Tensor]:
@@ -592,8 +713,9 @@ class BlockCacheLayer(HFCacheLayerMixin):
             parts_k.append(self._mat_k[:, :, :prefix_tokens, :])
             parts_v.append(self._mat_v[:, :, :prefix_tokens, :])
 
-        for blk in self.table.blocks[p:]:
-            k, v = self._materialize_block(blk, dtype)
+        suffix = self.table.blocks[p:]
+        if suffix:
+            k, v = self._materialize_blocks(suffix, dtype)
             parts_k.append(k)
             parts_v.append(v)
 
@@ -614,13 +736,7 @@ class BlockCacheLayer(HFCacheLayerMixin):
     def _materialize_legacy(
         self, dtype: torch.dtype
     ) -> tuple[torch.Tensor, torch.Tensor]:
-        ks: list[torch.Tensor] = []
-        vs: list[torch.Tensor] = []
-        for blk in self.table.blocks:
-            k, v = self._materialize_block(blk, dtype)
-            ks.append(k)
-            vs.append(v)
-        return torch.cat(ks, dim=2), torch.cat(vs, dim=2)
+        return self._materialize_blocks(self.table.blocks, dtype)
 
     def record_attention(self, attn_weights: torch.Tensor) -> None:
         """Accumulate attention mass per page."""
