@@ -17,9 +17,12 @@ from turboquant.block_cache import (
     BlockTable,
     GroupingPolicy,
     HybridPolicy,
+    NormPageImportanceScorer,
     PageQuantBackend,
+    PageImportanceScorer,
     SKVQPageCompressor,
     TokenBlockPolicy,
+    TopRatioPageBitAllocator,
     WindowBlockPolicy,
     available_page_backends,
     register_page_backend,
@@ -115,6 +118,70 @@ def test_per_block_compress_decompress_roundtrip():
     # per-block is lossier than per-vector, allow more headroom
     assert err.item() < 0.4, f"per-block 8-bit error too high: {err.item()}"
     print(f"ok: test_per_block_compress_decompress_roundtrip  err={err.item():.4f}")
+
+
+def test_norm_importance_score_many_matches_single_block_scores():
+    table = BlockTable(block_size=4, head_dim=8, n_kv_heads=2, batch_size=1)
+    k, v = _kv(1, 2, 16, 8)
+    blocks = table.append(k, v)
+    scorer = NormPageImportanceScorer("k_norm")
+
+    batched = scorer.score_many(blocks, table, layer_idx=0)
+    single = [scorer.score(block, table, layer_idx=0) for block in blocks]
+
+    assert torch.allclose(torch.tensor(batched), torch.tensor(single), atol=1e-6)
+    print("ok: test_norm_importance_score_many_matches_single_block_scores")
+
+
+class StaticScoreScorer(PageImportanceScorer):
+    name = "static"
+
+    def __init__(self, scores):
+        self.scores = list(scores)
+
+    def score(self, block, table, layer_idx):
+        return float(self.scores[block.block_idx])
+
+    def score_many(self, blocks, table, layer_idx):
+        return [self.score(block, table, layer_idx) for block in blocks]
+
+
+def test_top_ratio_allocator_run_aware_selects_contiguous_segment():
+    table = BlockTable(block_size=4, head_dim=8, n_kv_heads=2, batch_size=1)
+    k, v = _kv(1, 2, 16, 8)
+    blocks = table.append(k, v)
+    scorer = StaticScoreScorer([10.0, 1.0, 9.0, 1.0])
+
+    run_aware = TopRatioPageBitAllocator(
+        scorer=scorer,
+        important_ratio=0.5,
+        high_key_bits=4,
+        high_value_bits=4,
+        low_key_bits=2,
+        low_value_bits=2,
+        run_aware=True,
+    )
+    assignments = run_aware.assign_many(blocks, table, layer_idx=0)
+    high_ids = {
+        block_idx for block_idx, bits in assignments.items() if bits == (4.0, 4.0)
+    }
+    assert high_ids == {0, 1}
+
+    scattered = TopRatioPageBitAllocator(
+        scorer=scorer,
+        important_ratio=0.5,
+        high_key_bits=4,
+        high_value_bits=4,
+        low_key_bits=2,
+        low_value_bits=2,
+        run_aware=False,
+    )
+    assignments = scattered.assign_many(blocks, table, layer_idx=0)
+    high_ids = {
+        block_idx for block_idx, bits in assignments.items() if bits == (4.0, 4.0)
+    }
+    assert high_ids == {0, 2}
+    print("ok: test_top_ratio_allocator_run_aware_selects_contiguous_segment")
 
 
 def test_block_kv_cache_update_returns_full_history():
@@ -893,6 +960,8 @@ def main():
     test_hybrid_policy_sink_and_window()
     test_per_vector_compress_decompress_roundtrip()
     test_per_block_compress_decompress_roundtrip()
+    test_norm_importance_score_many_matches_single_block_scores()
+    test_top_ratio_allocator_run_aware_selects_contiguous_segment()
     test_block_kv_cache_update_returns_full_history()
     test_incremental_materialize_matches_legacy_path()
     test_turboquant_batched_compression_matches_single_page_path()

@@ -10,6 +10,8 @@ import random
 from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING
 
+import torch
+
 if TYPE_CHECKING:
     from .blocks import BlockTable, KVBlock
 
@@ -22,6 +24,11 @@ class PageImportanceScorer(ABC):
     @abstractmethod
     def score(self, block: "KVBlock", table: "BlockTable", layer_idx: int) -> float:
         ...
+
+    def score_many(
+        self, blocks: list["KVBlock"], table: "BlockTable", layer_idx: int
+    ) -> list[float]:
+        return [self.score(block, table, layer_idx) for block in blocks]
 
 
 class NormPageImportanceScorer(PageImportanceScorer):
@@ -43,6 +50,42 @@ class NormPageImportanceScorer(PageImportanceScorer):
         if self.mode in ("v_norm", "kv_norm"):
             scores.append(float(block.fp16_v.float().norm(dim=-1).mean().item()))
         return sum(scores) / max(len(scores), 1)
+
+    @torch.no_grad()
+    def score_many(
+        self, blocks: list["KVBlock"], table: "BlockTable", layer_idx: int
+    ) -> list[float]:
+        if not blocks:
+            return []
+        if any(block.fp16_k is None or block.fp16_v is None for block in blocks):
+            return [self.score(block, table, layer_idx) for block in blocks]
+
+        lengths = {int(block.current_len) for block in blocks}
+        if len(lengths) != 1:
+            return self._score_many_variable_length(blocks)
+
+        score_terms: list[torch.Tensor] = []
+        if self.mode in ("k_norm", "kv_norm"):
+            ks = torch.stack([block.fp16_k for block in blocks], dim=0).float()
+            score_terms.append(ks.norm(dim=-1).mean(dim=(1, 2, 3)))
+        if self.mode in ("v_norm", "kv_norm"):
+            vs = torch.stack([block.fp16_v for block in blocks], dim=0).float()
+            score_terms.append(vs.norm(dim=-1).mean(dim=(1, 2, 3)))
+
+        scores = sum(score_terms) / max(len(score_terms), 1)
+        return [float(score) for score in scores.detach().cpu().tolist()]
+
+    def _score_many_variable_length(self, blocks: list["KVBlock"]) -> list[float]:
+        score_terms: list[torch.Tensor] = []
+        for block in blocks:
+            terms: list[torch.Tensor] = []
+            if self.mode in ("k_norm", "kv_norm"):
+                terms.append(block.fp16_k.float().norm(dim=-1).mean())
+            if self.mode in ("v_norm", "kv_norm"):
+                terms.append(block.fp16_v.float().norm(dim=-1).mean())
+            score_terms.append(sum(terms) / max(len(terms), 1))
+        scores = torch.stack(score_terms)
+        return [float(score) for score in scores.detach().cpu().tolist()]
 
 
 class RandomPageImportanceScorer(PageImportanceScorer):

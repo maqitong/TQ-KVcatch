@@ -143,6 +143,7 @@ class BlockCacheLayer(HFCacheLayerMixin):
                 high_value_bits=self.cfg.high_value_bits,
                 low_key_bits=self.cfg.low_key_bits,
                 low_value_bits=self.cfg.low_value_bits,
+                run_aware=self.cfg.pagemix_run_aware,
             )
         else:
             self.bit_allocator = FixedPageBitAllocator(

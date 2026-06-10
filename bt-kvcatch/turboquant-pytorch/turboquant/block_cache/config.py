@@ -22,6 +22,7 @@ class BlockCacheConfig:
     mixed_precision: bool = False
     importance_metric: str = "k_norm"
     important_ratio: float = 0.2
+    pagemix_run_aware: bool = True
     high_key_bits: float = 4
     high_value_bits: float = 2
     low_key_bits: float = 2
