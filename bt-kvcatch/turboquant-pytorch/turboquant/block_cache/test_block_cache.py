@@ -664,7 +664,7 @@ def test_paper_pure_mix_protection_defaults_are_latency_safe():
         protected_key_bits=8,
         protected_value_bits=8,
     )
-    assert paper_pure_layer_protection("tq_pure_mix", default_args) == (1, 4.0, 4.0)
+    assert paper_pure_layer_protection("tq_pure_mix", default_args) == (1, 3.0, 2.0)
 
     explicit_args = SimpleNamespace(
         protected_layers=1,
@@ -678,7 +678,7 @@ def test_paper_pure_mix_protection_defaults_are_latency_safe():
         protected_key_bits=8,
         protected_value_bits=8,
     )
-    assert paper_pure_layer_protection("tq_pure_mix", disabled_args) == (0, 4.0, 4.0)
+    assert paper_pure_layer_protection("tq_pure_mix", disabled_args) == (0, 3.0, 2.0)
     assert paper_pure_layer_protection("tq_pure", explicit_args)[0] == 0
     print("ok: test_paper_pure_mix_protection_defaults_are_latency_safe")
 
@@ -711,7 +711,7 @@ def test_pure_mix_high_bits_default_to_latency_safe_profile():
     )
 
     pure_mix = cache_factory_for_backend(args, "block_tq_pure_mix")()
-    assert (pure_mix.config.high_key_bits, pure_mix.config.high_value_bits) == (3.0, 3.0)
+    assert (pure_mix.config.high_key_bits, pure_mix.config.high_value_bits) == (3.0, 2.0)
     assert (pure_mix.config.low_key_bits, pure_mix.config.low_value_bits) == (2.0, 2.0)
 
     regular_mix = cache_factory_for_backend(args, "block_tq_mix")()

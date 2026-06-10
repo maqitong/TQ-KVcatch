@@ -21,8 +21,8 @@ PAPER_GROUP_SIZE = 128
 # available when requested explicitly, but are too expensive as the implicit
 # default for the TurboQuant page compressor.
 PAPER_MIX_PROTECTED_LAYERS = 1
-PAPER_MIX_PROTECTED_KEY_BITS = 4
-PAPER_MIX_PROTECTED_VALUE_BITS = 4
+PAPER_MIX_PROTECTED_KEY_BITS = 3
+PAPER_MIX_PROTECTED_VALUE_BITS = 2
 
 
 def paper_pure_layer_protection(
