@@ -654,6 +654,35 @@ def test_shared_method_cache_factory():
     print("ok: test_shared_method_cache_factory")
 
 
+def test_paper_pure_mix_protection_defaults_are_latency_safe():
+    from turboquant.block_cache.skvq_native_integration import (
+        paper_pure_layer_protection,
+    )
+
+    default_args = SimpleNamespace(
+        protected_layers=0,
+        protected_key_bits=8,
+        protected_value_bits=8,
+    )
+    assert paper_pure_layer_protection("tq_pure_mix", default_args) == (1, 4.0, 4.0)
+
+    explicit_args = SimpleNamespace(
+        protected_layers=1,
+        protected_key_bits=8,
+        protected_value_bits=8,
+    )
+    assert paper_pure_layer_protection("tq_pure_mix", explicit_args) == (1, 8.0, 8.0)
+
+    disabled_args = SimpleNamespace(
+        protected_layers=-1,
+        protected_key_bits=8,
+        protected_value_bits=8,
+    )
+    assert paper_pure_layer_protection("tq_pure_mix", disabled_args) == (0, 4.0, 4.0)
+    assert paper_pure_layer_protection("tq_pure", explicit_args)[0] == 0
+    print("ok: test_paper_pure_mix_protection_defaults_are_latency_safe")
+
+
 def test_block_kv_cache_protected_layers_override_bits():
     cache = BlockKVCache(BlockCacheConfig(
         block_size=4,
@@ -979,6 +1008,7 @@ def main():
     test_block_kv_cache_turboquant_reorder_metadata()
     test_custom_page_backend_registry()
     test_shared_method_cache_factory()
+    test_paper_pure_mix_protection_defaults_are_latency_safe()
     test_block_kv_cache_protected_layers_override_bits()
     test_attention_score_importance_drives_mixed_precision()
     test_attention_score_deferred_pages_compress_after_recording()
