@@ -187,13 +187,12 @@ class LloydMaxCodebook:
         self.bits = bits
         self.n_levels = 2 ** bits
         self.centroids, self.boundaries = solve_lloyd_max(d, bits, use_exact)
+        self.boundaries = ((self.centroids[:-1] + self.centroids[1:]) * 0.5).contiguous()
         self.distortion = compute_expected_distortion(d, bits, self.centroids, self.boundaries, use_exact)
 
     def quantize(self, x: torch.Tensor) -> torch.Tensor:
         """Quantize values to nearest centroid indices."""
-        # x: (...,) -> indices: (...,) as uint8/int16
-        diffs = (x.unsqueeze(-1) - self.centroids.to(x.device))  # (..., n_levels)
-        return diffs.abs().argmin(dim=-1)
+        return torch.searchsorted(self.boundaries.to(x.device), x.contiguous())
 
     def dequantize(self, indices: torch.Tensor) -> torch.Tensor:
         """Map indices back to centroid values."""

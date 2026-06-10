@@ -32,6 +32,7 @@ from turboquant.block_cache.methods import (
     cache_factory_for_backend,
     parse_backend_selection,
 )
+from turboquant.compressors_v3 import MSECompressor
 from turboquant.block_cache.quantizer import BlockMSECompressor
 
 
@@ -118,6 +119,16 @@ def test_per_block_compress_decompress_roundtrip():
     # per-block is lossier than per-vector, allow more headroom
     assert err.item() < 0.4, f"per-block 8-bit error too high: {err.item()}"
     print(f"ok: test_per_block_compress_decompress_roundtrip  err={err.item():.4f}")
+
+
+def test_lloyd_max_boundary_quantization_matches_nearest_centroid():
+    values = torch.linspace(-0.5, 0.5, steps=255).reshape(17, 15, 1)
+    for bits in (2, 4, 8):
+        cmp = MSECompressor(head_dim=64, bits=bits, seed=1)
+        fast = cmp.quantize_indices(values)
+        brute = (values.unsqueeze(-1) - cmp.centroids).abs().argmin(dim=-1).to(torch.uint8)
+        assert torch.equal(fast, brute)
+    print("ok: test_lloyd_max_boundary_quantization_matches_nearest_centroid")
 
 
 def test_norm_importance_score_many_matches_single_block_scores():
@@ -654,7 +665,7 @@ def test_shared_method_cache_factory():
     print("ok: test_shared_method_cache_factory")
 
 
-def test_paper_pure_mix_protection_defaults_are_latency_safe():
+def test_paper_pure_mix_protection_defaults_match_page_mix():
     from turboquant.block_cache.skvq_native_integration import (
         paper_pure_layer_protection,
     )
@@ -664,7 +675,7 @@ def test_paper_pure_mix_protection_defaults_are_latency_safe():
         protected_key_bits=8,
         protected_value_bits=8,
     )
-    assert paper_pure_layer_protection("tq_pure_mix", default_args) == (1, 3.0, 2.0)
+    assert paper_pure_layer_protection("tq_pure_mix", default_args) == (1, 8.0, 8.0)
 
     explicit_args = SimpleNamespace(
         protected_layers=1,
@@ -678,12 +689,12 @@ def test_paper_pure_mix_protection_defaults_are_latency_safe():
         protected_key_bits=8,
         protected_value_bits=8,
     )
-    assert paper_pure_layer_protection("tq_pure_mix", disabled_args) == (0, 3.0, 2.0)
+    assert paper_pure_layer_protection("tq_pure_mix", disabled_args) == (0, 8.0, 8.0)
     assert paper_pure_layer_protection("tq_pure", explicit_args)[0] == 0
-    print("ok: test_paper_pure_mix_protection_defaults_are_latency_safe")
+    print("ok: test_paper_pure_mix_protection_defaults_match_page_mix")
 
 
-def test_pure_mix_high_bits_default_to_latency_safe_profile():
+def test_pure_mix_high_bits_default_to_page_mix_profile():
     args = SimpleNamespace(
         policy="hybrid",
         block_size=4,
@@ -711,7 +722,7 @@ def test_pure_mix_high_bits_default_to_latency_safe_profile():
     )
 
     pure_mix = cache_factory_for_backend(args, "block_tq_pure_mix")()
-    assert (pure_mix.config.high_key_bits, pure_mix.config.high_value_bits) == (3.0, 2.0)
+    assert (pure_mix.config.high_key_bits, pure_mix.config.high_value_bits) == (4.0, 4.0)
     assert (pure_mix.config.low_key_bits, pure_mix.config.low_value_bits) == (2.0, 2.0)
 
     regular_mix = cache_factory_for_backend(args, "block_tq_mix")()
@@ -726,7 +737,7 @@ def test_pure_mix_high_bits_default_to_latency_safe_profile():
         explicit_pure_mix.config.high_key_bits,
         explicit_pure_mix.config.high_value_bits,
     ) == (4.0, 4.0)
-    print("ok: test_pure_mix_high_bits_default_to_latency_safe_profile")
+    print("ok: test_pure_mix_high_bits_default_to_page_mix_profile")
 
 
 def test_block_kv_cache_protected_layers_override_bits():
@@ -1035,6 +1046,7 @@ def main():
     test_hybrid_policy_sink_and_window()
     test_per_vector_compress_decompress_roundtrip()
     test_per_block_compress_decompress_roundtrip()
+    test_lloyd_max_boundary_quantization_matches_nearest_centroid()
     test_norm_importance_score_many_matches_single_block_scores()
     test_top_ratio_allocator_run_aware_selects_contiguous_segment()
     test_block_kv_cache_update_returns_full_history()
@@ -1054,8 +1066,8 @@ def main():
     test_block_kv_cache_turboquant_reorder_metadata()
     test_custom_page_backend_registry()
     test_shared_method_cache_factory()
-    test_paper_pure_mix_protection_defaults_are_latency_safe()
-    test_pure_mix_high_bits_default_to_latency_safe_profile()
+    test_paper_pure_mix_protection_defaults_match_page_mix()
+    test_pure_mix_high_bits_default_to_page_mix_profile()
     test_block_kv_cache_protected_layers_override_bits()
     test_attention_score_importance_drives_mixed_precision()
     test_attention_score_deferred_pages_compress_after_recording()

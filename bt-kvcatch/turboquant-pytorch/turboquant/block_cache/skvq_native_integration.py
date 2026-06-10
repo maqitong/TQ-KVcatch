@@ -17,12 +17,10 @@ PAPER_WINDOW = 128
 PAPER_CLIP = 0.96
 PAPER_GROUP_SIZE = 128
 
-# Latency-safe defaults for ``block_tq_pure_mix``. 8-bit protected layers remain
-# available when requested explicitly, but are too expensive as the implicit
-# default for the TurboQuant page compressor.
+# Align ``block_tq_pure_mix`` with main ``Hybrid+TQ+Block+PageMix`` (run_gpu0.sh).
 PAPER_MIX_PROTECTED_LAYERS = 1
-PAPER_MIX_PROTECTED_KEY_BITS = 3
-PAPER_MIX_PROTECTED_VALUE_BITS = 2
+PAPER_MIX_PROTECTED_KEY_BITS = 8
+PAPER_MIX_PROTECTED_VALUE_BITS = 8
 
 
 def paper_pure_layer_protection(

@@ -110,8 +110,7 @@ class BlockMSECompressor:
 
         # rotate + per-coordinate Lloyd-Max
         rotated = scaled.reshape(-1, D) @ self._inner.Pi.T  # (B*H*S, D)
-        diffs = rotated.unsqueeze(-1) - self._inner.centroids  # (N, D, levels)
-        indices = diffs.abs().argmin(dim=-1).to(torch.uint8)  # (N, D)
+        indices = self._inner.quantize_indices(rotated)  # (N, D)
         packed, pad = _pack_uint8(indices, self._inner.bits)
         n_groups = packed.shape[-1]
 

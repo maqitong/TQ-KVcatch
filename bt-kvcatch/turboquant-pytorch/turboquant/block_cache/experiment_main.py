@@ -548,8 +548,8 @@ def main() -> None:
 
     parser.add_argument("--importance-metric", default="k_norm")
     parser.add_argument("--important-ratio", type=float, default=0.3)
-    parser.add_argument("--high-key-bits", type=_parse_bits, default=None)
-    parser.add_argument("--high-value-bits", type=_parse_bits, default=None)
+    parser.add_argument("--high-key-bits", type=_parse_bits, default=4)
+    parser.add_argument("--high-value-bits", type=_parse_bits, default=4)
     parser.add_argument("--low-key-bits", type=_parse_bits, default=2)
     parser.add_argument("--low-value-bits", type=_parse_bits, default=2)
     parser.add_argument("--num-layers", type=int, default=None)
