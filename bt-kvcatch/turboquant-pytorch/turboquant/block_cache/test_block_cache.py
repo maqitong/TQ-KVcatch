@@ -683,6 +683,52 @@ def test_paper_pure_mix_protection_defaults_are_latency_safe():
     print("ok: test_paper_pure_mix_protection_defaults_are_latency_safe")
 
 
+def test_pure_mix_high_bits_default_to_latency_safe_profile():
+    args = SimpleNamespace(
+        policy="hybrid",
+        block_size=4,
+        sink=4,
+        window=8,
+        key_bits=2,
+        value_bits=2,
+        granularity="per-vector",
+        importance_metric="k_norm",
+        important_ratio=0.5,
+        high_key_bits=None,
+        high_value_bits=None,
+        low_key_bits=None,
+        low_value_bits=None,
+        num_layers=2,
+        protected_layers=0,
+        protected_key_bits=8,
+        protected_value_bits=8,
+        group_size=8,
+        key_group_size=None,
+        value_group_size=None,
+        clipping=1.0,
+        reorder_file=None,
+        max_cached_decompressed_blocks=0,
+    )
+
+    pure_mix = cache_factory_for_backend(args, "block_tq_pure_mix")()
+    assert (pure_mix.config.high_key_bits, pure_mix.config.high_value_bits) == (3.0, 3.0)
+    assert (pure_mix.config.low_key_bits, pure_mix.config.low_value_bits) == (2.0, 2.0)
+
+    regular_mix = cache_factory_for_backend(args, "block_tq_mix")()
+    assert (regular_mix.config.high_key_bits, regular_mix.config.high_value_bits) == (
+        4.0,
+        4.0,
+    )
+
+    explicit = SimpleNamespace(**{**vars(args), "high_key_bits": 4, "high_value_bits": 4})
+    explicit_pure_mix = cache_factory_for_backend(explicit, "block_tq_pure_mix")()
+    assert (
+        explicit_pure_mix.config.high_key_bits,
+        explicit_pure_mix.config.high_value_bits,
+    ) == (4.0, 4.0)
+    print("ok: test_pure_mix_high_bits_default_to_latency_safe_profile")
+
+
 def test_block_kv_cache_protected_layers_override_bits():
     cache = BlockKVCache(BlockCacheConfig(
         block_size=4,
@@ -1009,6 +1055,7 @@ def main():
     test_custom_page_backend_registry()
     test_shared_method_cache_factory()
     test_paper_pure_mix_protection_defaults_are_latency_safe()
+    test_pure_mix_high_bits_default_to_latency_safe_profile()
     test_block_kv_cache_protected_layers_override_bits()
     test_attention_score_importance_drives_mixed_precision()
     test_attention_score_deferred_pages_compress_after_recording()

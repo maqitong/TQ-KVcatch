@@ -32,6 +32,7 @@ import torch
 from turboquant.block_cache.eval_niah import _parse_optional_int, build_prompt
 from turboquant.block_cache.methods import (
     MethodSpec,
+    _mix_bits as _shared_mix_bits,
     build_main_methods as _shared_build_main_methods,
     cache_factory_for_method as _shared_cache_factory_for_method,
     method_config as _shared_method_config,
@@ -436,8 +437,8 @@ def _write_outputs(results: list[MainResult], args) -> None:
                     "incremental_materialize": args.incremental_materialize,
                     "quant_budget_per_update": args.quant_budget_per_update,
                     "important_ratio": args.important_ratio,
-                    "high_bits": [args.high_key_bits, args.high_value_bits],
-                    "low_bits": [args.low_key_bits, args.low_value_bits],
+                    "high_bits": list(_shared_mix_bits(args)[:2]),
+                    "low_bits": list(_shared_mix_bits(args)[2:]),
                     "num_layers": args.num_layers,
                     "protected_layers": args.protected_layers,
                     "protected_bits": [
@@ -547,8 +548,8 @@ def main() -> None:
 
     parser.add_argument("--importance-metric", default="k_norm")
     parser.add_argument("--important-ratio", type=float, default=0.3)
-    parser.add_argument("--high-key-bits", type=_parse_bits, default=4)
-    parser.add_argument("--high-value-bits", type=_parse_bits, default=4)
+    parser.add_argument("--high-key-bits", type=_parse_bits, default=None)
+    parser.add_argument("--high-value-bits", type=_parse_bits, default=None)
     parser.add_argument("--low-key-bits", type=_parse_bits, default=2)
     parser.add_argument("--low-value-bits", type=_parse_bits, default=2)
     parser.add_argument("--num-layers", type=int, default=None)

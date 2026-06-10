@@ -30,6 +30,7 @@ import torch
 from turboquant.block_cache import BlockKVCache
 from turboquant.block_cache.methods import (
     NIAH_ALL_BACKENDS,
+    _mix_bits,
     build_policy as _shared_build_policy,
     cache_factory_for_backend,
     parse_backend_selection,
@@ -293,6 +294,9 @@ def run_case(model, tokenizer, args, backend: str, context_length: int, position
     found = expected.lower() in response.lower()
     report = cache.memory_report() if cache is not None else None
 
+    high_k, high_v, low_k, low_v = _mix_bits(
+        args, pure_mix=backend == "block_tq_pure_mix"
+    )
     return NIAHResult(
         backend=backend,
         model=args.model,
@@ -320,10 +324,10 @@ def run_case(model, tokenizer, args, backend: str, context_length: int, position
             "mixed": backend.endswith("_mix"),
             "importance_metric": args.importance_metric,
             "important_ratio": args.important_ratio,
-            "high_key_bits": args.high_key_bits,
-            "high_value_bits": args.high_value_bits,
-            "low_key_bits": args.low_key_bits,
-            "low_value_bits": args.low_value_bits,
+            "high_key_bits": high_k,
+            "high_value_bits": high_v,
+            "low_key_bits": low_k,
+            "low_value_bits": low_v,
             "num_layers": args.num_layers,
             "protected_layers": args.protected_layers,
             "protected_key_bits": args.protected_key_bits,
@@ -464,8 +468,8 @@ def main() -> None:
 
     parser.add_argument("--importance-metric", default="k_norm")
     parser.add_argument("--important-ratio", type=float, default=0.3)
-    parser.add_argument("--high-key-bits", type=_parse_bits, default=4)
-    parser.add_argument("--high-value-bits", type=_parse_bits, default=4)
+    parser.add_argument("--high-key-bits", type=_parse_bits, default=None)
+    parser.add_argument("--high-value-bits", type=_parse_bits, default=None)
     parser.add_argument("--low-key-bits", type=_parse_bits, default=2)
     parser.add_argument("--low-value-bits", type=_parse_bits, default=2)
     parser.add_argument("--num-layers", type=int, default=None)
