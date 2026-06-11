@@ -27,6 +27,7 @@ from turboquant.block_cache import (
     available_page_backends,
     register_page_backend,
 )
+from turboquant.block_cache.backends.turboquant import TurboQuantPageBackend
 from turboquant.block_cache.methods import (
     NIAH_ALL_BACKENDS,
     cache_factory_for_backend,
@@ -623,6 +624,61 @@ def test_block_kv_cache_base_residual_mixed_precision():
     print("ok: test_block_kv_cache_base_residual_mixed_precision")
 
 
+def test_base_residual_uses_batched_residual_path():
+    original_get_compressor = TurboQuantPageBackend.get_compressor
+    calls = {"k2_compress": 0, "residual_k_decompress": 0}
+
+    class CountingCompressor:
+        def __init__(self, inner):
+            self.inner = inner
+
+        def compress(self, states):
+            calls["k2_compress"] += 1
+            return self.inner.compress(states)
+
+        def decompress(self, compressed):
+            if compressed["shape"][2] > 4 and compressed.get("ttype") == "k_residual":
+                calls["residual_k_decompress"] += 1
+            return self.inner.decompress(compressed)
+
+    def counted_get_compressor(self, ttype, bits):
+        compressor = original_get_compressor(self, ttype, bits)
+        if ttype == "k" and float(bits) == 2.0:
+            return CountingCompressor(compressor)
+        return compressor
+
+    TurboQuantPageBackend.get_compressor = counted_get_compressor
+    try:
+        cache = BlockKVCache(BlockCacheConfig(
+            block_size=4,
+            key_bits=2,
+            value_bits=2,
+            policy=TokenBlockPolicy(),
+            quant_backend="turboquant",
+            mixed_precision=True,
+            mixed_precision_mode="base_residual",
+            importance_metric="k_norm",
+            important_ratio=1.0,
+            high_key_bits=4,
+            high_value_bits=4,
+            residual_key_bits=2,
+            residual_value_bits=0,
+            max_cached_decompressed_blocks=0,
+            incremental_materialize=False,
+        ))
+        k, v = _kv(1, 2, 16, 8)
+        cache.update(k, v, layer_idx=0)
+        assert calls["k2_compress"] == 2
+
+        calls["residual_k_decompress"] = 0
+        cache.layers[0]._materialize(dtype=torch.float16)
+        assert calls["residual_k_decompress"] == 1
+    finally:
+        TurboQuantPageBackend.get_compressor = original_get_compressor
+
+    print("ok: test_base_residual_uses_batched_residual_path")
+
+
 def test_custom_page_backend_registry():
     class IdentityPageBackend(PageQuantBackend):
         name = "identity_test"
@@ -1115,6 +1171,7 @@ def main():
     test_block_kv_cache_skvq_reorder_metadata()
     test_block_kv_cache_turboquant_reorder_metadata()
     test_block_kv_cache_base_residual_mixed_precision()
+    test_base_residual_uses_batched_residual_path()
     test_custom_page_backend_registry()
     test_shared_method_cache_factory()
     test_paper_pure_mix_protection_defaults_match_page_mix()
