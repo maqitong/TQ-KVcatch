@@ -59,14 +59,18 @@ class TopRatioPageBitAllocator(PageBitAllocator):
         low_key_bits: float,
         low_value_bits: float,
         run_aware: bool = True,
+        max_high_runs: int = 1,
     ):
         if not 0.0 <= important_ratio <= 1.0:
             raise ValueError("important_ratio must be in [0, 1]")
+        if max_high_runs < 1:
+            raise ValueError("max_high_runs must be >= 1")
         self.scorer = scorer
         self.important_ratio = important_ratio
         self.high_bits = (float(high_key_bits), float(high_value_bits))
         self.low_bits = (float(low_key_bits), float(low_value_bits))
         self.run_aware = bool(run_aware)
+        self.max_high_runs = int(max_high_runs)
 
     def assign(self, block: "KVBlock", table: "BlockTable", layer_idx: int) -> BitPair:
         block.importance = self.scorer.score(block, table, layer_idx)
@@ -112,6 +116,7 @@ class TopRatioPageBitAllocator(PageBitAllocator):
                 "rank": rank,
                 "threshold": threshold,
                 "precision": "high" if is_high else "low",
+                "max_high_runs": self.max_high_runs if self.run_aware else None,
             })
             block.page_meta = meta
             out[block.block_idx] = bits
@@ -133,6 +138,9 @@ class TopRatioPageBitAllocator(PageBitAllocator):
             }
 
         ordered = sorted(scored, key=lambda item: item[1].block_idx)
+        if self.max_high_runs > 1:
+            return self._select_segmented_high_block_ids(ordered, n_high)
+
         window_sum = sum(score for score, _block in ordered[:n_high])
         best_sum = window_sum
         best_start = 0
@@ -146,3 +154,41 @@ class TopRatioPageBitAllocator(PageBitAllocator):
             block.block_idx
             for _score, block in ordered[best_start : best_start + n_high]
         }
+
+    def _select_segmented_high_block_ids(
+        self, ordered: list[tuple[float, "KVBlock"]], n_high: int
+    ) -> set[int]:
+        states: dict[
+            tuple[int, int, bool], tuple[float, tuple[int, ...]]
+        ] = {(0, 0, False): (0.0, ())}
+        max_runs = min(self.max_high_runs, n_high)
+
+        for score, block in ordered:
+            next_states: dict[
+                tuple[int, int, bool], tuple[float, tuple[int, ...]]
+            ] = {}
+            for (count, runs, in_run), (total, ids) in states.items():
+                skip_key = (count, runs, False)
+                current = next_states.get(skip_key)
+                if current is None or total > current[0]:
+                    next_states[skip_key] = (total, ids)
+
+                if count >= n_high:
+                    continue
+                next_runs = runs if in_run else runs + 1
+                if next_runs > max_runs:
+                    continue
+                key = (count + 1, next_runs, True)
+                value = (total + score, ids + (block.block_idx,))
+                current = next_states.get(key)
+                if current is None or value[0] > current[0]:
+                    next_states[key] = value
+            states = next_states
+
+        candidates = [
+            value for (count, _runs, _in_run), value in states.items() if count == n_high
+        ]
+        if not candidates:
+            return set()
+        _score, ids = max(candidates, key=lambda item: item[0])
+        return set(ids)

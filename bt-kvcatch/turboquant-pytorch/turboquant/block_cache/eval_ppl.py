@@ -269,6 +269,7 @@ def evaluate_backend(model, input_ids: torch.Tensor, args, backend: str) -> PPLR
             ),
             "importance_metric": args.importance_metric,
             "important_ratio": args.important_ratio,
+            "pagemix_max_high_runs": args.pagemix_max_high_runs,
             "high_key_bits": high_k,
             "high_value_bits": high_v,
             "low_key_bits": low_k,
@@ -387,6 +388,7 @@ def main() -> None:
 
     parser.add_argument("--importance-metric", default="k_norm")
     parser.add_argument("--important-ratio", type=float, default=0.3)
+    parser.add_argument("--pagemix-max-high-runs", type=int, default=1)
     parser.add_argument("--high-key-bits", type=_parse_bits, default=4)
     parser.add_argument("--high-value-bits", type=_parse_bits, default=4)
     parser.add_argument("--low-key-bits", type=_parse_bits, default=2)

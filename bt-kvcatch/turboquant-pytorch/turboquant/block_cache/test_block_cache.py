@@ -15,6 +15,7 @@ from turboquant.block_cache import (
     BlockKVCache,
     BlockState,
     BlockTable,
+    BlockCacheLayer,
     GroupingPolicy,
     HybridPolicy,
     NormPageImportanceScorer,
@@ -194,6 +195,70 @@ def test_top_ratio_allocator_run_aware_selects_contiguous_segment():
     }
     assert high_ids == {0, 2}
     print("ok: test_top_ratio_allocator_run_aware_selects_contiguous_segment")
+
+
+def test_top_ratio_allocator_supports_limited_high_runs():
+    table = BlockTable(block_size=4, head_dim=8, n_kv_heads=2, batch_size=1)
+    k, v = _kv(1, 2, 24, 8)
+    blocks = table.append(k, v)
+    scorer = StaticScoreScorer([10.0, 1.0, 1.0, 9.0, 8.0, 1.0])
+
+    single_run = TopRatioPageBitAllocator(
+        scorer=scorer,
+        important_ratio=0.5,
+        high_key_bits=4,
+        high_value_bits=4,
+        low_key_bits=2,
+        low_value_bits=2,
+        run_aware=True,
+        max_high_runs=1,
+    )
+    assignments = single_run.assign_many(blocks, table, layer_idx=0)
+    high_ids = {
+        block_idx for block_idx, bits in assignments.items() if bits == (4.0, 4.0)
+    }
+    assert high_ids == {2, 3, 4}
+
+    two_runs = TopRatioPageBitAllocator(
+        scorer=scorer,
+        important_ratio=0.5,
+        high_key_bits=4,
+        high_value_bits=4,
+        low_key_bits=2,
+        low_value_bits=2,
+        run_aware=True,
+        max_high_runs=2,
+    )
+    assignments = two_runs.assign_many(blocks, table, layer_idx=0)
+    high_ids = {
+        block_idx for block_idx, bits in assignments.items() if bits == (4.0, 4.0)
+    }
+    assert high_ids == {0, 3, 4}
+    print("ok: test_top_ratio_allocator_supports_limited_high_runs")
+
+
+def test_turboquant_compression_groups_contiguous_bit_runs():
+    table = BlockTable(block_size=4, head_dim=8, n_kv_heads=2, batch_size=1)
+    k, v = _kv(1, 2, 20, 8)
+    blocks = table.append(k, v)
+    prepared = [
+        (blocks[0], 2, 2),
+        (blocks[1], 4, 4),
+        (blocks[2], 4, 4),
+        (blocks[3], 2, 2),
+        (blocks[4], 2, 2),
+    ]
+
+    runs = BlockCacheLayer._contiguous_bit_runs(prepared)
+    assert [
+        (k_bits, v_bits, [blk.block_idx for blk in run])
+        for k_bits, v_bits, run in runs
+    ] == [
+        (2.0, 2.0, [0]),
+        (4.0, 4.0, [1, 2]),
+        (2.0, 2.0, [3, 4]),
+    ]
+    print("ok: test_turboquant_compression_groups_contiguous_bit_runs")
 
 
 def test_block_kv_cache_update_returns_full_history():
@@ -1155,6 +1220,8 @@ def main():
     test_lloyd_max_boundary_quantization_matches_nearest_centroid()
     test_norm_importance_score_many_matches_single_block_scores()
     test_top_ratio_allocator_run_aware_selects_contiguous_segment()
+    test_top_ratio_allocator_supports_limited_high_runs()
+    test_turboquant_compression_groups_contiguous_bit_runs()
     test_block_kv_cache_update_returns_full_history()
     test_incremental_materialize_matches_legacy_path()
     test_turboquant_batched_compression_matches_single_page_path()

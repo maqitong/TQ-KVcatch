@@ -437,6 +437,7 @@ def _write_outputs(results: list[MainResult], args) -> None:
                     "incremental_materialize": args.incremental_materialize,
                     "quant_budget_per_update": args.quant_budget_per_update,
                     "important_ratio": args.important_ratio,
+                    "pagemix_max_high_runs": args.pagemix_max_high_runs,
                     "high_bits": list(_shared_mix_bits(args)[:2]),
                     "low_bits": list(_shared_mix_bits(args)[2:]),
                     "mixed_precision_mode": args.mixed_precision_mode,
@@ -553,6 +554,7 @@ def main() -> None:
 
     parser.add_argument("--importance-metric", default="k_norm")
     parser.add_argument("--important-ratio", type=float, default=0.3)
+    parser.add_argument("--pagemix-max-high-runs", type=int, default=1)
     parser.add_argument("--high-key-bits", type=_parse_bits, default=4)
     parser.add_argument("--high-value-bits", type=_parse_bits, default=4)
     parser.add_argument("--low-key-bits", type=_parse_bits, default=2)

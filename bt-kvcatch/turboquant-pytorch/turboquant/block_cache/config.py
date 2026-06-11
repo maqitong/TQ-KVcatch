@@ -24,6 +24,7 @@ class BlockCacheConfig:
     importance_metric: str = "k_norm"
     important_ratio: float = 0.2
     pagemix_run_aware: bool = True
+    pagemix_max_high_runs: int = 1
     high_key_bits: float = 4
     high_value_bits: float = 2
     low_key_bits: float = 2
@@ -54,3 +55,5 @@ class BlockCacheConfig:
             raise ValueError("quant_budget_per_update must be non-negative or None")
         if self.residual_key_bits < 0 or self.residual_value_bits < 0:
             raise ValueError("residual bit-widths must be non-negative")
+        if self.pagemix_max_high_runs < 1:
+            raise ValueError("pagemix_max_high_runs must be >= 1")

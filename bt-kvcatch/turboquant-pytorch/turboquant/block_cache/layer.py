@@ -144,6 +144,7 @@ class BlockCacheLayer(HFCacheLayerMixin):
                 low_key_bits=self.cfg.low_key_bits,
                 low_value_bits=self.cfg.low_value_bits,
                 run_aware=self.cfg.pagemix_run_aware,
+                max_high_runs=self.cfg.pagemix_max_high_runs,
             )
         else:
             self.bit_allocator = FixedPageBitAllocator(
@@ -493,11 +494,7 @@ class BlockCacheLayer(HFCacheLayerMixin):
         if self.cfg.granularity != "per-vector":
             return False
 
-        groups: dict[tuple[float, float], list[KVBlock]] = {}
-        for blk, k_bits, v_bits in prepared:
-            groups.setdefault((float(k_bits), float(v_bits)), []).append(blk)
-
-        for (k_bits, v_bits), group in groups.items():
+        for k_bits, v_bits, group in self._contiguous_bit_runs(prepared):
             if len(group) == 1:
                 blk = group[0]
                 ck, cv = self.page_backend.compress(
@@ -530,6 +527,32 @@ class BlockCacheLayer(HFCacheLayerMixin):
             for blk, ck, cv in zip(group, split_k, split_v):
                 self._finalize_compressed_block(blk, ck, cv)
         return True
+
+    @staticmethod
+    def _contiguous_bit_runs(
+        prepared: list[tuple[KVBlock, float, float]]
+    ) -> list[tuple[float, float, list[KVBlock]]]:
+        runs: list[tuple[float, float, list[KVBlock]]] = []
+        current_bits: Optional[tuple[float, float]] = None
+        current_blocks: list[KVBlock] = []
+        previous_idx: Optional[int] = None
+
+        for blk, k_bits, v_bits in sorted(prepared, key=lambda item: item[0].block_idx):
+            bits = (float(k_bits), float(v_bits))
+            is_contiguous = previous_idx is not None and blk.block_idx == previous_idx + 1
+            if current_blocks and (bits != current_bits or not is_contiguous):
+                assert current_bits is not None
+                runs.append((current_bits[0], current_bits[1], current_blocks))
+                current_blocks = []
+
+            current_bits = bits
+            current_blocks.append(blk)
+            previous_idx = blk.block_idx
+
+        if current_blocks:
+            assert current_bits is not None
+            runs.append((current_bits[0], current_bits[1], current_blocks))
+        return runs
 
     def _can_store_turboquant_runs(self) -> bool:
         return (

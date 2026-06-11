@@ -315,6 +315,7 @@ def _block_backend_config(
         mixed_precision_mode=getattr(args, "mixed_precision_mode", "direct"),
         importance_metric=args.importance_metric,
         important_ratio=args.important_ratio,
+        pagemix_max_high_runs=getattr(args, "pagemix_max_high_runs", 1),
         high_key_bits=high_k,
         high_value_bits=high_v,
         low_key_bits=low_k,
@@ -458,6 +459,7 @@ def cache_factory_for_method(args: Any, method: MethodSpec) -> Callable[[], Any]
             mixed_precision_mode=getattr(args, "mixed_precision_mode", "direct"),
             importance_metric=method.importance_metric,
             important_ratio=args.important_ratio,
+            pagemix_max_high_runs=getattr(args, "pagemix_max_high_runs", 1),
             high_key_bits=method.high_key_bits,
             high_value_bits=method.high_value_bits,
             low_key_bits=method.low_key_bits,
@@ -524,6 +526,9 @@ def backend_config(args: Any, backend: str) -> dict[str, Any]:
             "mixed": mixed,
             "mixed_precision_mode": getattr(args, "mixed_precision_mode", "direct") if mixed else None,
             "important_ratio": args.important_ratio if mixed else None,
+            "pagemix_max_high_runs": (
+                getattr(args, "pagemix_max_high_runs", 1) if mixed else None
+            ),
             "importance_metric": args.importance_metric if mixed else None,
             "high_key_bits": high_k if mixed else None,
             "high_value_bits": high_v if mixed else None,
@@ -564,6 +569,7 @@ def backend_config(args: Any, backend: str) -> dict[str, Any]:
         ),
         "importance_metric": args.importance_metric,
         "important_ratio": args.important_ratio,
+        "pagemix_max_high_runs": getattr(args, "pagemix_max_high_runs", 1),
         "high_key_bits": high_k,
         "high_value_bits": high_v,
         "low_key_bits": low_k,
@@ -626,6 +632,11 @@ def method_config(args: Any, method: MethodSpec) -> dict[str, Any]:
                 else None
             ),
             "important_ratio": args.important_ratio if method.mixed_precision else None,
+            "pagemix_max_high_runs": (
+                getattr(args, "pagemix_max_high_runs", 1)
+                if method.mixed_precision
+                else None
+            ),
             "importance_metric": method.importance_metric if method.mixed_precision else None,
             "high_key_bits": method.high_key_bits if method.mixed_precision else None,
             "high_value_bits": method.high_value_bits if method.mixed_precision else None,
@@ -676,6 +687,11 @@ def method_config(args: Any, method: MethodSpec) -> dict[str, Any]:
         ),
         "importance_metric": method.importance_metric if method.mixed_precision else None,
         "important_ratio": args.important_ratio if method.mixed_precision else None,
+        "pagemix_max_high_runs": (
+            getattr(args, "pagemix_max_high_runs", 1)
+            if method.mixed_precision
+            else None
+        ),
         "high_key_bits": method.high_key_bits if method.mixed_precision else None,
         "high_value_bits": method.high_value_bits if method.mixed_precision else None,
         "low_key_bits": method.low_key_bits if method.mixed_precision else None,

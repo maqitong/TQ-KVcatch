@@ -157,6 +157,9 @@ def _base_args(cli_args, config: dict[str, Any]) -> SimpleNamespace:
         ),
         "importance_metric": config.get("importance_metric", cli_args.importance_metric),
         "important_ratio": config.get("important_ratio", cli_args.important_ratio),
+        "pagemix_max_high_runs": config.get(
+            "pagemix_max_high_runs", cli_args.pagemix_max_high_runs
+        ),
         "high_key_bits": config.get("high_key_bits", cli_args.high_key_bits),
         "high_value_bits": config.get("high_value_bits", cli_args.high_value_bits),
         "low_key_bits": config.get("low_key_bits", cli_args.low_key_bits),
@@ -199,6 +202,7 @@ def _write_outputs(rows: list[dict[str, Any]], output_dir: Path) -> None:
         "input_tokens",
         "block_size",
         "important_ratio",
+        "pagemix_max_high_runs",
         "high_key_bits",
         "high_value_bits",
         "low_key_bits",
@@ -293,6 +297,7 @@ def main() -> None:
 
     parser.add_argument("--importance-metric", default="k_norm")
     parser.add_argument("--important-ratio", type=float, default=0.3)
+    parser.add_argument("--pagemix-max-high-runs", type=int, default=1)
     parser.add_argument("--high-key-bits", type=_parse_scalar, default=4)
     parser.add_argument("--high-value-bits", type=_parse_scalar, default=4)
     parser.add_argument("--low-key-bits", type=_parse_scalar, default=2)

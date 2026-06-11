@@ -581,6 +581,7 @@ def main() -> None:
 
     parser.add_argument("--importance-metric", default="k_norm")
     parser.add_argument("--important-ratio", type=float, default=0.3)
+    parser.add_argument("--pagemix-max-high-runs", type=int, default=1)
     parser.add_argument("--high-key-bits", type=_parse_bits, default=4)
     parser.add_argument("--high-value-bits", type=_parse_bits, default=4)
     parser.add_argument("--low-key-bits", type=_parse_bits, default=2)
