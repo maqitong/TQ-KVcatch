@@ -36,6 +36,8 @@ from turboquant.block_cache.methods import (
 )
 from turboquant.compressors_v3 import MSECompressor
 from turboquant.block_cache.quantizer import BlockMSECompressor
+from turboquant.lloyd_max import LloydMaxCodebook, get_codebook
+from turboquant.turboquant import get_rotation_matrix
 
 
 def _kv(B: int, H: int, S: int, D: int, dtype=torch.float16) -> tuple[torch.Tensor, torch.Tensor]:
@@ -131,6 +133,27 @@ def test_lloyd_max_boundary_quantization_matches_nearest_centroid():
         brute = (values.unsqueeze(-1) - cmp.centroids).abs().argmin(dim=-1).to(torch.uint8)
         assert torch.equal(fast, brute)
     print("ok: test_lloyd_max_boundary_quantization_matches_nearest_centroid")
+
+
+def test_codebook_and_rotation_are_memoized():
+    direct = LloydMaxCodebook(64, 4)
+    cached = get_codebook(64, 4)
+    cached_again = get_codebook(64, 4)
+    assert cached is cached_again
+    assert torch.allclose(cached.centroids, direct.centroids)
+    values = torch.linspace(-0.5, 0.5, steps=255)
+    assert torch.equal(cached.quantize(values), direct.quantize(values))
+
+    rot = get_rotation_matrix(64, seed=123)
+    rot_again = get_rotation_matrix(64, seed=123)
+    assert rot is rot_again
+    assert torch.allclose(rot @ rot.T, torch.eye(64), atol=1e-5, rtol=1e-5)
+
+    cmp1 = MSECompressor(head_dim=64, bits=4, seed=123)
+    cmp2 = MSECompressor(head_dim=64, bits=4, seed=123)
+    assert cmp1.Pi is cmp2.Pi
+    assert cmp1.centroids.data_ptr() == cmp2.centroids.data_ptr()
+    print("ok: test_codebook_and_rotation_are_memoized")
 
 
 def test_norm_importance_score_many_matches_single_block_scores():
@@ -1218,6 +1241,7 @@ def main():
     test_per_vector_compress_decompress_roundtrip()
     test_per_block_compress_decompress_roundtrip()
     test_lloyd_max_boundary_quantization_matches_nearest_centroid()
+    test_codebook_and_rotation_are_memoized()
     test_norm_importance_score_many_matches_single_block_scores()
     test_top_ratio_allocator_run_aware_selects_contiguous_segment()
     test_top_ratio_allocator_supports_limited_high_runs()

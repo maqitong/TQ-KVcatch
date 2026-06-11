@@ -12,6 +12,7 @@ We solve the Lloyd-Max conditions (continuous 1-D k-means) to find optimal centr
 
 import torch
 import math
+from functools import cached_property
 
 try:
     from scipy import integrate, special  # type: ignore
@@ -109,9 +110,9 @@ def solve_lloyd_max(d: int, bits: int, use_exact: bool = False, max_iter: int = 
         centroids: sorted tensor of 2^bits optimal centroids
         boundaries: sorted tensor of 2^bits - 1 boundaries between centroids
     """
-    if not _SCIPY_AVAILABLE and not use_exact:
+    if not use_exact:
         return _solve_gaussian_lloyd_max(d, bits, max_iter, tol)
-    if not _SCIPY_AVAILABLE and use_exact:
+    if not _SCIPY_AVAILABLE:
         raise ImportError("scipy is required for exact Beta Lloyd-Max codebooks")
 
     n_levels = 2 ** bits
@@ -188,7 +189,13 @@ class LloydMaxCodebook:
         self.n_levels = 2 ** bits
         self.centroids, self.boundaries = solve_lloyd_max(d, bits, use_exact)
         self.boundaries = ((self.centroids[:-1] + self.centroids[1:]) * 0.5).contiguous()
-        self.distortion = compute_expected_distortion(d, bits, self.centroids, self.boundaries, use_exact)
+        self.use_exact = use_exact
+
+    @cached_property
+    def distortion(self) -> float:
+        return compute_expected_distortion(
+            self.d, self.bits, self.centroids, self.boundaries, self.use_exact
+        )
 
     def quantize(self, x: torch.Tensor) -> torch.Tensor:
         """Quantize values to nearest centroid indices."""
@@ -203,3 +210,18 @@ class LloydMaxCodebook:
             f"LloydMaxCodebook(d={self.d}, bits={self.bits}, "
             f"levels={self.n_levels}, distortion_per_coord={self.distortion:.6f})"
         )
+
+
+_CODEBOOK_CACHE: dict[tuple[int, int, bool], LloydMaxCodebook] = {}
+
+
+def get_codebook(d: int, bits: int, use_exact: bool = False) -> LloydMaxCodebook:
+    """Return a process-wide memoized deterministic Lloyd-Max codebook."""
+    key = (int(d), int(bits), bool(use_exact))
+    codebook = _CODEBOOK_CACHE.get(key)
+    if codebook is None:
+        codebook = LloydMaxCodebook(*key)
+        codebook.centroids.requires_grad_(False)
+        codebook.boundaries.requires_grad_(False)
+        _CODEBOOK_CACHE[key] = codebook
+    return codebook

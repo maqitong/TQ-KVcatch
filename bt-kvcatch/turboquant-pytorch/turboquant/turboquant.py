@@ -12,7 +12,7 @@ import torch.nn as nn
 import math
 from typing import Optional, Tuple
 
-from .lloyd_max import LloydMaxCodebook
+from .lloyd_max import get_codebook
 
 
 def generate_rotation_matrix(d: int, seed: Optional[int] = None, device: str = "cpu") -> torch.Tensor:
@@ -31,6 +31,20 @@ def generate_rotation_matrix(d: int, seed: Optional[int] = None, device: str = "
     diag_sign[diag_sign == 0] = 1.0
     Q = Q * diag_sign.unsqueeze(0)
     return Q.to(device)
+
+
+_ROTATION_CACHE: dict[tuple[int, Optional[int], str], torch.Tensor] = {}
+
+
+def get_rotation_matrix(d: int, seed: Optional[int] = None, device: str = "cpu") -> torch.Tensor:
+    """Return a process-wide memoized deterministic random rotation matrix."""
+    key = (int(d), seed, str(device))
+    matrix = _ROTATION_CACHE.get(key)
+    if matrix is None:
+        matrix = generate_rotation_matrix(d, seed=seed, device=device)
+        matrix.requires_grad_(False)
+        _ROTATION_CACHE[key] = matrix
+    return matrix
 
 
 def generate_qjl_matrix(d: int, m: Optional[int] = None, seed: Optional[int] = None, device: str = "cpu") -> torch.Tensor:
@@ -61,10 +75,10 @@ class TurboQuantMSE(nn.Module):
         self.device = device
 
         # Precompute rotation matrix
-        self.register_buffer("Pi", generate_rotation_matrix(d, seed=seed, device=device))
+        self.register_buffer("Pi", get_rotation_matrix(d, seed=seed, device=device))
 
         # Precompute Lloyd-Max codebook
-        self.codebook = LloydMaxCodebook(d, bits)
+        self.codebook = get_codebook(d, bits)
         self.register_buffer("centroids", self.codebook.centroids.to(device))
         self.register_buffer("boundaries", self.codebook.boundaries.to(device))
 

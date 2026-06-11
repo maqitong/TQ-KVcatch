@@ -21,8 +21,8 @@ import torch.nn.functional as F
 import math
 from typing import Optional
 
-from .lloyd_max import LloydMaxCodebook
-from .turboquant import generate_rotation_matrix
+from .lloyd_max import get_codebook
+from .turboquant import get_rotation_matrix
 
 
 class MSECompressor:
@@ -39,10 +39,10 @@ class MSECompressor:
         self.bits = bits
         self.device = device
 
-        self.Pi = generate_rotation_matrix(head_dim, seed=seed, device=device)
-        codebook = LloydMaxCodebook(head_dim, bits)
+        self.Pi = get_rotation_matrix(head_dim, seed=seed, device=device)
+        codebook = get_codebook(head_dim, bits)
         self.centroids = codebook.centroids.to(device)
-        self.boundaries = ((self.centroids[:-1] + self.centroids[1:]) * 0.5).contiguous()
+        self.boundaries = codebook.boundaries.to(device)
 
     def quantize_indices(self, values: torch.Tensor) -> torch.Tensor:
         """Map scalar values to nearest Lloyd-Max centroid indices."""
