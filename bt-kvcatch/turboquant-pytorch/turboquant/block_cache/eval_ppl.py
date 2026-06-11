@@ -51,6 +51,8 @@ class PPLResult:
     avg_compressed_blocks: float | None
     avg_fp16_blocks: float | None
     config: dict
+    bit_histogram: dict | None = None
+    residual_histogram: dict | None = None
     k_bpw: float | None = None
     v_bpw: float | None = None
     avg_bpw: float | None = None
@@ -216,9 +218,12 @@ def evaluate_backend(model, input_ids: torch.Tensor, args, backend: str) -> PPLR
     fp16 = [r["n_fp16_blocks"] for r in cache_reports]
 
     bit_histogram: dict[str, int] = {}
+    residual_histogram: dict[str, int] = {}
     for report in cache_reports:
         for key, count in (report.get("bit_histogram") or {}).items():
             bit_histogram[key] = bit_histogram.get(key, 0) + int(count)
+        for key, count in (report.get("residual_histogram") or {}).items():
+            residual_histogram[key] = residual_histogram.get(key, 0) + int(count)
 
     paper_sink = args.sink
     paper_window = args.window
@@ -256,6 +261,7 @@ def evaluate_backend(model, input_ids: torch.Tensor, args, backend: str) -> PPLR
             "key_bits": args.key_bits,
             "value_bits": args.value_bits,
             "mixed": backend.endswith("_mix"),
+            "mixed_precision_mode": args.mixed_precision_mode if backend.endswith("_mix") else None,
             "paper_baseline": (
                 "tq_pure_mix"
                 if backend == "block_tq_pure_mix"
@@ -267,6 +273,8 @@ def evaluate_backend(model, input_ids: torch.Tensor, args, backend: str) -> PPLR
             "high_value_bits": high_v,
             "low_key_bits": low_k,
             "low_value_bits": low_v,
+            "residual_key_bits": args.residual_key_bits,
+            "residual_value_bits": args.residual_value_bits,
             "num_layers": args.num_layers,
             "protected_layers": args.protected_layers,
             "protected_key_bits": args.protected_key_bits,
@@ -288,12 +296,15 @@ def evaluate_backend(model, input_ids: torch.Tensor, args, backend: str) -> PPLR
                 )
             ),
         },
+        bit_histogram=bit_histogram or None,
+        residual_histogram=residual_histogram or None,
     )
     payload = attach_bpw_fields(
         {
             "backend": backend,
             "avg_compression_ratio": result.avg_compression_ratio,
             "bit_histogram": bit_histogram or None,
+            "residual_histogram": residual_histogram or None,
             "config": result.config,
         }
     )
@@ -380,6 +391,13 @@ def main() -> None:
     parser.add_argument("--high-value-bits", type=_parse_bits, default=4)
     parser.add_argument("--low-key-bits", type=_parse_bits, default=2)
     parser.add_argument("--low-value-bits", type=_parse_bits, default=2)
+    parser.add_argument(
+        "--mixed-precision-mode",
+        choices=["direct", "base_residual"],
+        default="direct",
+    )
+    parser.add_argument("--residual-key-bits", type=_parse_bits, default=2)
+    parser.add_argument("--residual-value-bits", type=_parse_bits, default=0)
     parser.add_argument("--num-layers", type=int, default=None)
     parser.add_argument("--protected-layers", type=int, default=0)
     parser.add_argument("--protected-key-bits", type=_parse_bits, default=8)

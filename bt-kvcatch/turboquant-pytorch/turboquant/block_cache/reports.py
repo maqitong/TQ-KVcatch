@@ -18,6 +18,7 @@ def build_memory_report(layers: Iterable[Any]) -> dict[str, Any]:
     bit_histogram: dict[str, int] = {}
     precision_histogram: dict[str, int] = {}
     quant_status_histogram: dict[str, int] = {}
+    residual_histogram: dict[str, int] = {}
 
     for layer in layers:
         if layer.table is None:
@@ -48,6 +49,16 @@ def build_memory_report(layers: Iterable[Any]) -> dict[str, Any]:
                     precision_histogram[precision] = (
                         precision_histogram.get(precision, 0) + 1
                     )
+                residual_bits = (
+                    blk.page_meta.get("residual_bits")
+                    if isinstance(blk.page_meta, dict)
+                    else None
+                )
+                if residual_bits is not None:
+                    residual_key = f"K{residual_bits[0]}/V{residual_bits[1]}"
+                    residual_histogram[residual_key] = (
+                        residual_histogram.get(residual_key, 0) + 1
+                    )
             else:
                 n_fp16_blocks += 1
             compressed_bytes += blk.memory_bytes()
@@ -74,4 +85,5 @@ def build_memory_report(layers: Iterable[Any]) -> dict[str, Any]:
         "bit_histogram": bit_histogram,
         "precision_histogram": precision_histogram,
         "quant_status_histogram": quant_status_histogram,
+        "residual_histogram": residual_histogram,
     }

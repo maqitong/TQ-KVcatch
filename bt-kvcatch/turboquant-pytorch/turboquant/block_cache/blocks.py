@@ -16,6 +16,16 @@ from enum import Enum
 from typing import Optional
 
 
+def _payload_memory_bytes(value) -> int:
+    if torch.is_tensor(value):
+        return value.numel() * value.element_size()
+    if isinstance(value, dict):
+        return sum(_payload_memory_bytes(v) for v in value.values())
+    if isinstance(value, (list, tuple)):
+        return sum(_payload_memory_bytes(v) for v in value)
+    return 0
+
+
 class BlockState(Enum):
     FILLING = "filling"        # accepting new tokens, FP16
     SEALED = "sealed"          # full, FP16, awaiting policy decision
@@ -115,9 +125,7 @@ class KVBlock:
         for d in (self.compressed_k, self.compressed_v):
             if d is None:
                 continue
-            for val in d.values():
-                if torch.is_tensor(val):
-                    n += val.numel() * val.element_size()
+            n += _payload_memory_bytes(d)
         return n
 
 

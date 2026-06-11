@@ -573,6 +573,56 @@ def test_block_kv_cache_turboquant_reorder_metadata():
     print(f"ok: test_block_kv_cache_turboquant_reorder_metadata  err={err.item():.4f}")
 
 
+def test_block_kv_cache_base_residual_mixed_precision():
+    cache = BlockKVCache(BlockCacheConfig(
+        block_size=4,
+        key_bits=2,
+        value_bits=2,
+        policy=TokenBlockPolicy(),
+        quant_backend="turboquant",
+        mixed_precision=True,
+        mixed_precision_mode="base_residual",
+        importance_metric="k_norm",
+        important_ratio=0.5,
+        high_key_bits=4,
+        high_value_bits=4,
+        low_key_bits=2,
+        low_value_bits=2,
+        residual_key_bits=2,
+        residual_value_bits=0,
+        max_cached_decompressed_blocks=0,
+    ))
+    k, v = _kv(1, 2, 12, 8)
+    full_k, full_v = cache.update(k, v, layer_idx=0)
+    layer = cache.layers[0]
+    blocks = layer.table.blocks
+
+    assert full_k.shape == k.shape
+    assert full_v.shape == v.shape
+    assert all(blk.state == BlockState.COMPRESSED for blk in blocks)
+    assert all((blk.key_bits, blk.value_bits) == (2.0, 2.0) for blk in blocks)
+
+    residual_blocks = [
+        blk for blk in blocks if isinstance(blk.compressed_k, dict) and "__residual" in blk.compressed_k
+    ]
+    assert residual_blocks
+    assert all(
+        blk.page_meta["precision"] in ("base", "base_residual") for blk in blocks
+    )
+
+    report = cache.memory_report()
+    assert report["bit_histogram"]["K2.0/V2.0"] == len(blocks)
+    assert report["precision_histogram"]["base_residual"] == len(residual_blocks)
+    assert report["residual_histogram"]["K2.0/V0.0"] == len(residual_blocks)
+
+    restored = BlockKVCache(cache.config)
+    restored.load_state_dict(cache.state_dict())
+    restored_k, restored_v = restored.layers[0]._materialize(dtype=torch.float16)
+    assert torch.allclose(restored_k, full_k, atol=0, rtol=0)
+    assert torch.allclose(restored_v, full_v, atol=0, rtol=0)
+    print("ok: test_block_kv_cache_base_residual_mixed_precision")
+
+
 def test_custom_page_backend_registry():
     class IdentityPageBackend(PageQuantBackend):
         name = "identity_test"
@@ -1064,6 +1114,7 @@ def main():
     test_block_kv_cache_skvq_mixed_precision_pages()
     test_block_kv_cache_skvq_reorder_metadata()
     test_block_kv_cache_turboquant_reorder_metadata()
+    test_block_kv_cache_base_residual_mixed_precision()
     test_custom_page_backend_registry()
     test_shared_method_cache_factory()
     test_paper_pure_mix_protection_defaults_match_page_mix()

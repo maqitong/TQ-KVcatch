@@ -20,6 +20,7 @@ class BlockCacheConfig:
     policy: GroupingPolicy = field(default_factory=TokenBlockPolicy)
     quant_backend: str = "turboquant"  # 'turboquant' | 'skvq' | registered backend
     mixed_precision: bool = False
+    mixed_precision_mode: str = "direct"  # 'direct' | 'base_residual'
     importance_metric: str = "k_norm"
     important_ratio: float = 0.2
     pagemix_run_aware: bool = True
@@ -27,6 +28,8 @@ class BlockCacheConfig:
     high_value_bits: float = 2
     low_key_bits: float = 2
     low_value_bits: float = 2
+    residual_key_bits: float = 2
+    residual_value_bits: float = 0
     num_layers: Optional[int] = None
     protected_layers: int = 0
     protected_key_bits: Optional[float] = 8
@@ -45,5 +48,9 @@ class BlockCacheConfig:
     quant_budget_per_update: Optional[int] = None
 
     def __post_init__(self) -> None:
+        if self.mixed_precision_mode not in ("direct", "base_residual"):
+            raise ValueError("mixed_precision_mode must be 'direct' or 'base_residual'")
         if self.quant_budget_per_update is not None and self.quant_budget_per_update < 0:
             raise ValueError("quant_budget_per_update must be non-negative or None")
+        if self.residual_key_bits < 0 or self.residual_value_bits < 0:
+            raise ValueError("residual bit-widths must be non-negative")

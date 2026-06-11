@@ -30,6 +30,14 @@ def theoretical_bpw_from_config(
 
     if config.get("mixed"):
         ratio = _as_float(config.get("important_ratio"), 0.3)
+        if config.get("mixed_precision_mode") == "base_residual":
+            k = _as_float(config.get("low_key_bits"), 2) + ratio * _as_float(
+                config.get("residual_key_bits"), 2
+            )
+            v = _as_float(config.get("low_value_bits"), 2) + ratio * _as_float(
+                config.get("residual_value_bits"), 0
+            )
+            return k, v, (k + v) / 2.0
         k = ratio * _as_float(config.get("high_key_bits"), 4) + (1 - ratio) * _as_float(
             config.get("low_key_bits"), 2
         )
@@ -45,6 +53,7 @@ def theoretical_bpw_from_config(
 
 def theoretical_bpw_from_histogram(
     bit_histogram: dict[str, int],
+    residual_histogram: dict[str, int] | None = None,
 ) -> tuple[float, float, float]:
     """Weighted K/V/Avg bpw from memory_report bit_histogram."""
     total = 0
@@ -61,6 +70,12 @@ def theoretical_bpw_from_histogram(
         v_acc += v_bits * count
     if total <= 0:
         return 0.0, 0.0, 0.0
+    for key, count in (residual_histogram or {}).items():
+        m = _BIT_HIST_RE.fullmatch(str(key))
+        if not m or count <= 0:
+            continue
+        k_acc += float(m.group(1)) * count
+        v_acc += float(m.group(2)) * count
     k_bpw = k_acc / total
     v_bpw = v_acc / total
     return k_bpw, v_bpw, (k_bpw + v_bpw) / 2.0
@@ -82,7 +97,9 @@ def attach_bpw_fields(row: dict[str, Any]) -> dict[str, Any]:
         k_bpw = v_bpw = avg_bpw = FP16_BITS
         effective = FP16_BITS
     elif row.get("bit_histogram"):
-        k_bpw, v_bpw, avg_bpw = theoretical_bpw_from_histogram(row["bit_histogram"])
+        k_bpw, v_bpw, avg_bpw = theoretical_bpw_from_histogram(
+            row["bit_histogram"], row.get("residual_histogram")
+        )
         effective = effective_bpw_kv_pair(row.get("avg_compression_ratio"))
     else:
         k_bpw, v_bpw, avg_bpw = theoretical_bpw_from_config(backend, cfg)

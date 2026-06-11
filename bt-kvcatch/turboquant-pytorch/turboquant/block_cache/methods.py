@@ -312,12 +312,15 @@ def _block_backend_config(
         policy=policy,
         quant_backend=quant_backend,
         mixed_precision=mixed,
+        mixed_precision_mode=getattr(args, "mixed_precision_mode", "direct"),
         importance_metric=args.importance_metric,
         important_ratio=args.important_ratio,
         high_key_bits=high_k,
         high_value_bits=high_v,
         low_key_bits=low_k,
         low_value_bits=low_v,
+        residual_key_bits=getattr(args, "residual_key_bits", 2),
+        residual_value_bits=getattr(args, "residual_value_bits", 0),
         num_layers=args.num_layers,
         protected_layers=protected_layers,
         protected_key_bits=prot_k,
@@ -452,12 +455,15 @@ def cache_factory_for_method(args: Any, method: MethodSpec) -> Callable[[], Any]
             policy=policy,
             quant_backend=method.quant_backend,
             mixed_precision=method.mixed_precision,
+            mixed_precision_mode=getattr(args, "mixed_precision_mode", "direct"),
             importance_metric=method.importance_metric,
             important_ratio=args.important_ratio,
             high_key_bits=method.high_key_bits,
             high_value_bits=method.high_value_bits,
             low_key_bits=method.low_key_bits,
             low_value_bits=method.low_value_bits,
+            residual_key_bits=getattr(args, "residual_key_bits", 2),
+            residual_value_bits=getattr(args, "residual_value_bits", 0),
             num_layers=args.num_layers,
             protected_layers=protected_layers,
             protected_key_bits=prot_k,
@@ -516,12 +522,15 @@ def backend_config(args: Any, backend: str) -> dict[str, Any]:
             "key_bits": args.key_bits,
             "value_bits": args.value_bits,
             "mixed": mixed,
+            "mixed_precision_mode": getattr(args, "mixed_precision_mode", "direct") if mixed else None,
             "important_ratio": args.important_ratio if mixed else None,
             "importance_metric": args.importance_metric if mixed else None,
             "high_key_bits": high_k if mixed else None,
             "high_value_bits": high_v if mixed else None,
             "low_key_bits": low_k if mixed else None,
             "low_value_bits": low_v if mixed else None,
+            "residual_key_bits": getattr(args, "residual_key_bits", 2) if mixed else None,
+            "residual_value_bits": getattr(args, "residual_value_bits", 0) if mixed else None,
             "paper_baseline": paper_tag,
             "reorder": False,
             "protected_layers": prot_layers,
@@ -548,12 +557,19 @@ def backend_config(args: Any, backend: str) -> dict[str, Any]:
         "key_bits": args.key_bits,
         "value_bits": args.value_bits,
         "mixed": backend.endswith("_mix"),
+        "mixed_precision_mode": (
+            getattr(args, "mixed_precision_mode", "direct")
+            if backend.endswith("_mix")
+            else None
+        ),
         "importance_metric": args.importance_metric,
         "important_ratio": args.important_ratio,
         "high_key_bits": high_k,
         "high_value_bits": high_v,
         "low_key_bits": low_k,
         "low_value_bits": low_v,
+        "residual_key_bits": getattr(args, "residual_key_bits", 2),
+        "residual_value_bits": getattr(args, "residual_value_bits", 0),
         "num_layers": args.num_layers,
         "protected_layers": args.protected_layers,
         "protected_key_bits": args.protected_key_bits,
@@ -604,12 +620,23 @@ def method_config(args: Any, method: MethodSpec) -> dict[str, Any]:
             "key_bits": method.key_bits,
             "value_bits": method.value_bits,
             "mixed_precision": method.mixed_precision,
+            "mixed_precision_mode": (
+                getattr(args, "mixed_precision_mode", "direct")
+                if method.mixed_precision
+                else None
+            ),
             "important_ratio": args.important_ratio if method.mixed_precision else None,
             "importance_metric": method.importance_metric if method.mixed_precision else None,
             "high_key_bits": method.high_key_bits if method.mixed_precision else None,
             "high_value_bits": method.high_value_bits if method.mixed_precision else None,
             "low_key_bits": method.low_key_bits if method.mixed_precision else None,
             "low_value_bits": method.low_value_bits if method.mixed_precision else None,
+            "residual_key_bits": (
+                getattr(args, "residual_key_bits", 2) if method.mixed_precision else None
+            ),
+            "residual_value_bits": (
+                getattr(args, "residual_value_bits", 0) if method.mixed_precision else None
+            ),
             "paper_baseline": method.paper_baseline,
             "reorder": False,
             "protected_layers": prot_layers,
@@ -642,12 +669,23 @@ def method_config(args: Any, method: MethodSpec) -> dict[str, Any]:
         "key_bits": method.key_bits,
         "value_bits": method.value_bits,
         "mixed_precision": method.mixed_precision,
+        "mixed_precision_mode": (
+            getattr(args, "mixed_precision_mode", "direct")
+            if method.mixed_precision
+            else None
+        ),
         "importance_metric": method.importance_metric if method.mixed_precision else None,
         "important_ratio": args.important_ratio if method.mixed_precision else None,
         "high_key_bits": method.high_key_bits if method.mixed_precision else None,
         "high_value_bits": method.high_value_bits if method.mixed_precision else None,
         "low_key_bits": method.low_key_bits if method.mixed_precision else None,
         "low_value_bits": method.low_value_bits if method.mixed_precision else None,
+        "residual_key_bits": (
+            getattr(args, "residual_key_bits", 2) if method.mixed_precision else None
+        ),
+        "residual_value_bits": (
+            getattr(args, "residual_value_bits", 0) if method.mixed_precision else None
+        ),
         "num_layers": args.num_layers,
         "protected_layers": args.protected_layers,
         "protected_key_bits": args.protected_key_bits,
