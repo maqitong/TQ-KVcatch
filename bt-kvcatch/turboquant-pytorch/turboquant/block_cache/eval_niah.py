@@ -325,13 +325,10 @@ def run_case(model, tokenizer, args, backend: str, context_length: int, position
             "mixed_precision_mode": args.mixed_precision_mode if backend.endswith("_mix") else None,
             "importance_metric": args.importance_metric,
             "important_ratio": args.important_ratio,
-            "pagemix_max_high_runs": args.pagemix_max_high_runs,
             "high_key_bits": high_k,
             "high_value_bits": high_v,
             "low_key_bits": low_k,
             "low_value_bits": low_v,
-            "residual_key_bits": args.residual_key_bits,
-            "residual_value_bits": args.residual_value_bits,
             "num_layers": args.num_layers,
             "protected_layers": args.protected_layers,
             "protected_key_bits": args.protected_key_bits,
@@ -472,18 +469,15 @@ def main() -> None:
 
     parser.add_argument("--importance-metric", default="k_norm")
     parser.add_argument("--important-ratio", type=float, default=0.3)
-    parser.add_argument("--pagemix-max-high-runs", type=int, default=1)
     parser.add_argument("--high-key-bits", type=_parse_bits, default=4)
     parser.add_argument("--high-value-bits", type=_parse_bits, default=4)
     parser.add_argument("--low-key-bits", type=_parse_bits, default=2)
     parser.add_argument("--low-value-bits", type=_parse_bits, default=2)
     parser.add_argument(
         "--mixed-precision-mode",
-        choices=["direct", "base_residual"],
+        choices=["direct"],
         default="direct",
     )
-    parser.add_argument("--residual-key-bits", type=_parse_bits, default=2)
-    parser.add_argument("--residual-value-bits", type=_parse_bits, default=0)
     parser.add_argument("--num-layers", type=int, default=None)
     parser.add_argument("--protected-layers", type=int, default=0)
     parser.add_argument("--protected-key-bits", type=_parse_bits, default=8)

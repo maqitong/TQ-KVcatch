@@ -220,46 +220,6 @@ def test_top_ratio_allocator_run_aware_selects_contiguous_segment():
     print("ok: test_top_ratio_allocator_run_aware_selects_contiguous_segment")
 
 
-def test_top_ratio_allocator_supports_limited_high_runs():
-    table = BlockTable(block_size=4, head_dim=8, n_kv_heads=2, batch_size=1)
-    k, v = _kv(1, 2, 24, 8)
-    blocks = table.append(k, v)
-    scorer = StaticScoreScorer([10.0, 1.0, 1.0, 9.0, 8.0, 1.0])
-
-    single_run = TopRatioPageBitAllocator(
-        scorer=scorer,
-        important_ratio=0.5,
-        high_key_bits=4,
-        high_value_bits=4,
-        low_key_bits=2,
-        low_value_bits=2,
-        run_aware=True,
-        max_high_runs=1,
-    )
-    assignments = single_run.assign_many(blocks, table, layer_idx=0)
-    high_ids = {
-        block_idx for block_idx, bits in assignments.items() if bits == (4.0, 4.0)
-    }
-    assert high_ids == {2, 3, 4}
-
-    two_runs = TopRatioPageBitAllocator(
-        scorer=scorer,
-        important_ratio=0.5,
-        high_key_bits=4,
-        high_value_bits=4,
-        low_key_bits=2,
-        low_value_bits=2,
-        run_aware=True,
-        max_high_runs=2,
-    )
-    assignments = two_runs.assign_many(blocks, table, layer_idx=0)
-    high_ids = {
-        block_idx for block_idx, bits in assignments.items() if bits == (4.0, 4.0)
-    }
-    assert high_ids == {0, 3, 4}
-    print("ok: test_top_ratio_allocator_supports_limited_high_runs")
-
-
 def test_turboquant_compression_groups_contiguous_bit_runs():
     table = BlockTable(block_size=4, head_dim=8, n_kv_heads=2, batch_size=1)
     k, v = _kv(1, 2, 20, 8)
@@ -660,111 +620,6 @@ def test_block_kv_cache_turboquant_reorder_metadata():
     restored_k, _ = restored.layers[0]._materialize(dtype=torch.float16)
     assert torch.allclose(restored_k, full_k, atol=0, rtol=0)
     print(f"ok: test_block_kv_cache_turboquant_reorder_metadata  err={err.item():.4f}")
-
-
-def test_block_kv_cache_base_residual_mixed_precision():
-    cache = BlockKVCache(BlockCacheConfig(
-        block_size=4,
-        key_bits=2,
-        value_bits=2,
-        policy=TokenBlockPolicy(),
-        quant_backend="turboquant",
-        mixed_precision=True,
-        mixed_precision_mode="base_residual",
-        importance_metric="k_norm",
-        important_ratio=0.5,
-        high_key_bits=4,
-        high_value_bits=4,
-        low_key_bits=2,
-        low_value_bits=2,
-        residual_key_bits=2,
-        residual_value_bits=0,
-        max_cached_decompressed_blocks=0,
-    ))
-    k, v = _kv(1, 2, 12, 8)
-    full_k, full_v = cache.update(k, v, layer_idx=0)
-    layer = cache.layers[0]
-    blocks = layer.table.blocks
-
-    assert full_k.shape == k.shape
-    assert full_v.shape == v.shape
-    assert all(blk.state == BlockState.COMPRESSED for blk in blocks)
-    assert all((blk.key_bits, blk.value_bits) == (2.0, 2.0) for blk in blocks)
-
-    residual_blocks = [
-        blk for blk in blocks if isinstance(blk.compressed_k, dict) and "__residual" in blk.compressed_k
-    ]
-    assert residual_blocks
-    assert all(
-        blk.page_meta["precision"] in ("base", "base_residual") for blk in blocks
-    )
-
-    report = cache.memory_report()
-    assert report["bit_histogram"]["K2.0/V2.0"] == len(blocks)
-    assert report["precision_histogram"]["base_residual"] == len(residual_blocks)
-    assert report["residual_histogram"]["K2.0/V0.0"] == len(residual_blocks)
-
-    restored = BlockKVCache(cache.config)
-    restored.load_state_dict(cache.state_dict())
-    restored_k, restored_v = restored.layers[0]._materialize(dtype=torch.float16)
-    assert torch.allclose(restored_k, full_k, atol=0, rtol=0)
-    assert torch.allclose(restored_v, full_v, atol=0, rtol=0)
-    print("ok: test_block_kv_cache_base_residual_mixed_precision")
-
-
-def test_base_residual_uses_batched_residual_path():
-    original_get_compressor = TurboQuantPageBackend.get_compressor
-    calls = {"k2_compress": 0, "residual_k_decompress": 0}
-
-    class CountingCompressor:
-        def __init__(self, inner):
-            self.inner = inner
-
-        def compress(self, states):
-            calls["k2_compress"] += 1
-            return self.inner.compress(states)
-
-        def decompress(self, compressed):
-            if compressed["shape"][2] > 4 and compressed.get("ttype") == "k_residual":
-                calls["residual_k_decompress"] += 1
-            return self.inner.decompress(compressed)
-
-    def counted_get_compressor(self, ttype, bits):
-        compressor = original_get_compressor(self, ttype, bits)
-        if ttype == "k" and float(bits) == 2.0:
-            return CountingCompressor(compressor)
-        return compressor
-
-    TurboQuantPageBackend.get_compressor = counted_get_compressor
-    try:
-        cache = BlockKVCache(BlockCacheConfig(
-            block_size=4,
-            key_bits=2,
-            value_bits=2,
-            policy=TokenBlockPolicy(),
-            quant_backend="turboquant",
-            mixed_precision=True,
-            mixed_precision_mode="base_residual",
-            importance_metric="k_norm",
-            important_ratio=1.0,
-            high_key_bits=4,
-            high_value_bits=4,
-            residual_key_bits=2,
-            residual_value_bits=0,
-            max_cached_decompressed_blocks=0,
-            incremental_materialize=False,
-        ))
-        k, v = _kv(1, 2, 16, 8)
-        cache.update(k, v, layer_idx=0)
-        assert calls["k2_compress"] == 2
-
-        calls["residual_k_decompress"] = 0
-        cache.layers[0]._materialize(dtype=torch.float16)
-        assert calls["residual_k_decompress"] == 1
-    finally:
-        TurboQuantPageBackend.get_compressor = original_get_compressor
-
-    print("ok: test_base_residual_uses_batched_residual_path")
 
 
 def test_custom_page_backend_registry():
@@ -1244,7 +1099,6 @@ def main():
     test_codebook_and_rotation_are_memoized()
     test_norm_importance_score_many_matches_single_block_scores()
     test_top_ratio_allocator_run_aware_selects_contiguous_segment()
-    test_top_ratio_allocator_supports_limited_high_runs()
     test_turboquant_compression_groups_contiguous_bit_runs()
     test_block_kv_cache_update_returns_full_history()
     test_incremental_materialize_matches_legacy_path()
@@ -1261,8 +1115,6 @@ def main():
     test_block_kv_cache_skvq_mixed_precision_pages()
     test_block_kv_cache_skvq_reorder_metadata()
     test_block_kv_cache_turboquant_reorder_metadata()
-    test_block_kv_cache_base_residual_mixed_precision()
-    test_base_residual_uses_batched_residual_path()
     test_custom_page_backend_registry()
     test_shared_method_cache_factory()
     test_paper_pure_mix_protection_defaults_match_page_mix()

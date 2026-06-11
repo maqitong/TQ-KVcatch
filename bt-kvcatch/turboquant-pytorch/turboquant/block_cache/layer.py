@@ -144,7 +144,6 @@ class BlockCacheLayer(HFCacheLayerMixin):
                 low_key_bits=self.cfg.low_key_bits,
                 low_value_bits=self.cfg.low_value_bits,
                 run_aware=self.cfg.pagemix_run_aware,
-                max_high_runs=self.cfg.pagemix_max_high_runs,
             )
         else:
             self.bit_allocator = FixedPageBitAllocator(
@@ -167,20 +166,6 @@ class BlockCacheLayer(HFCacheLayerMixin):
 
     def _uses_budgeted_quantization(self) -> bool:
         return self.cfg.quant_budget_per_update is not None
-
-    def _uses_base_residual_mixed_precision(self) -> bool:
-        return (
-            self.cfg.mixed_precision
-            and self.cfg.mixed_precision_mode == "base_residual"
-            and isinstance(self.page_backend, TurboQuantPageBackend)
-            and self.cfg.granularity == "per-vector"
-        )
-
-    def _is_high_precision_assignment(self, k_bits: float, v_bits: float) -> bool:
-        return (
-            float(k_bits) == float(self.cfg.high_key_bits)
-            and float(v_bits) == float(self.cfg.high_value_bits)
-        )
 
     def _attention_ready_blocks(self, blocks: list[KVBlock]) -> list[KVBlock]:
         if not self._uses_attention_importance():
@@ -266,10 +251,6 @@ class BlockCacheLayer(HFCacheLayerMixin):
             bit_assignments = self.bit_allocator.assign_many(
                 blocks, self.table, self.layer_idx
             )
-        if self._uses_base_residual_mixed_precision():
-            self._compress_blocks_base_residual(blocks, bit_assignments)
-            return
-
         prepared: list[tuple[KVBlock, float, float]] = []
         for blk in blocks:
             if blk.state != BlockState.SEALED:
@@ -292,184 +273,6 @@ class BlockCacheLayer(HFCacheLayerMixin):
                 layer_idx=self.layer_idx,
             )
             self._finalize_compressed_block(blk, ck, cv)
-
-    def _compress_blocks_base_residual(
-        self,
-        blocks: list[KVBlock],
-        bit_assignments: dict[int, tuple[float, float]],
-    ) -> None:
-        if not isinstance(self.page_backend, TurboQuantPageBackend):
-            raise RuntimeError("base_residual mode requires TurboQuant backend")
-
-        direct: list[tuple[KVBlock, float, float]] = []
-        base: list[tuple[KVBlock, bool]] = []
-        base_k_bits = float(self.cfg.low_key_bits)
-        base_v_bits = float(self.cfg.low_value_bits)
-
-        for blk in blocks:
-            if blk.state != BlockState.SEALED:
-                continue
-            assigned_k, assigned_v = bit_assignments[blk.block_idx]
-            protected_k, protected_v = self._apply_layer_protection(
-                blk, assigned_k, assigned_v
-            )
-            is_protected = isinstance(blk.page_meta, dict) and blk.page_meta.get(
-                "protected_layer", False
-            )
-            if is_protected:
-                blk.key_bits = protected_k
-                blk.value_bits = protected_v
-                direct.append((blk, protected_k, protected_v))
-                continue
-
-            has_residual = self._is_high_precision_assignment(assigned_k, assigned_v)
-            blk.key_bits = base_k_bits
-            blk.value_bits = base_v_bits
-            meta = dict(blk.page_meta) if isinstance(blk.page_meta, dict) else {}
-            meta.update(
-                {
-                    "mixed_precision_mode": "base_residual",
-                    "base_bits": (base_k_bits, base_v_bits),
-                    "precision": "base_residual" if has_residual else "base",
-                }
-            )
-            if has_residual:
-                meta["residual_bits"] = (
-                    float(self.cfg.residual_key_bits),
-                    float(self.cfg.residual_value_bits),
-                )
-            blk.page_meta = meta
-            base.append((blk, has_residual))
-
-        if direct:
-            self._try_compress_turboquant_batched(direct)
-        if base:
-            self._compress_base_residual_group(base, base_k_bits, base_v_bits)
-
-    def _compress_base_residual_group(
-        self,
-        prepared: list[tuple[KVBlock, bool]],
-        base_k_bits: float,
-        base_v_bits: float,
-    ) -> None:
-        if self.page_backend is None:
-            raise RuntimeError("page backend was not initialized")
-        blocks = [blk for blk, _has_residual in prepared]
-        lengths = [blk.current_len for blk in blocks]
-        batched_k = torch.cat([blk.fp16_k for blk in blocks], dim=2)
-        batched_v = torch.cat([blk.fp16_v for blk in blocks], dim=2)
-        ck_all, cv_all = self.page_backend.compress(
-            batched_k,
-            batched_v,
-            key_bits=base_k_bits,
-            value_bits=base_v_bits,
-            layer_idx=self.layer_idx,
-        )
-        if self._can_store_turboquant_runs():
-            split_k, split_v = self._register_turboquant_run(
-                blocks, ck_all, cv_all, base_k_bits, base_v_bits
-            )
-        else:
-            split_k = self._split_turboquant_compressed(ck_all, lengths)
-            split_v = self._split_turboquant_compressed(cv_all, lengths)
-
-        self._attach_batched_residual_payloads(
-            prepared,
-            split_k,
-            split_v,
-            ck_all,
-            cv_all,
-            base_k_bits=base_k_bits,
-            base_v_bits=base_v_bits,
-            source_k=batched_k,
-            source_v=batched_v,
-        )
-
-        for blk, ck, cv in zip(blocks, split_k, split_v):
-            self._finalize_compressed_block(blk, ck, cv)
-
-    def _attach_batched_residual_payloads(
-        self,
-        prepared: list[tuple[KVBlock, bool]],
-        split_k: list[dict[str, Any]],
-        split_v: list[dict[str, Any]],
-        base_compressed_k: dict[str, Any],
-        base_compressed_v: dict[str, Any],
-        *,
-        base_k_bits: float,
-        base_v_bits: float,
-        source_k: torch.Tensor,
-        source_v: torch.Tensor,
-    ) -> None:
-        if self.page_backend is None or not isinstance(
-            self.page_backend, TurboQuantPageBackend
-        ):
-            raise RuntimeError("base_residual mode requires TurboQuant backend")
-        residual_entries: list[tuple[int, KVBlock, int, int]] = []
-        start = 0
-        for idx, (blk, has_residual) in enumerate(prepared):
-            end = start + blk.current_len
-            if has_residual:
-                residual_entries.append((idx, blk, start, end))
-            start = end
-        if not residual_entries:
-            return
-
-        base_k, base_v = self.page_backend.decompress(
-            base_compressed_k,
-            base_compressed_v,
-            key_bits=base_k_bits,
-            value_bits=base_v_bits,
-            dtype=source_k.dtype,
-        )
-
-        residual_k_bits = float(self.cfg.residual_key_bits)
-        residual_v_bits = float(self.cfg.residual_value_bits)
-        if residual_k_bits > 0:
-            residual_parts = [
-                (source_k[:, :, start:end, :] - base_k[:, :, start:end, :]).contiguous()
-                for _idx, _blk, start, end in residual_entries
-            ]
-            residual_k = torch.cat(residual_parts, dim=2)
-            rk_all = self.page_backend.get_compressor("k", residual_k_bits).compress(
-                residual_k
-            )
-            rk_all.update(
-                {
-                    "backend": "turboquant_residual",
-                    "ttype": "k_residual",
-                    "layer_idx": self.layer_idx,
-                }
-            )
-            split_rk = self._split_turboquant_compressed(
-                rk_all, [blk.current_len for _idx, blk, _start, _end in residual_entries]
-            )
-            for (idx, _blk, _start, _end), rk in zip(residual_entries, split_rk):
-                split_k[idx]["__residual"] = rk
-                split_k[idx]["__residual_bits"] = residual_k_bits
-
-        if residual_v_bits > 0:
-            residual_parts = [
-                (source_v[:, :, start:end, :] - base_v[:, :, start:end, :]).contiguous()
-                for _idx, _blk, start, end in residual_entries
-            ]
-            residual_v = torch.cat(residual_parts, dim=2)
-            rv_all = self.page_backend.get_compressor("v", residual_v_bits).compress(
-                residual_v
-            )
-            rv_all.update(
-                {
-                    "backend": "turboquant_residual",
-                    "ttype": "v_residual",
-                    "layer_idx": self.layer_idx,
-                }
-            )
-            split_rv = self._split_turboquant_compressed(
-                rv_all, [blk.current_len for _idx, blk, _start, _end in residual_entries]
-            )
-            for (idx, _blk, _start, _end), rv in zip(residual_entries, split_rv):
-                split_v[idx]["__residual"] = rv
-                split_v[idx]["__residual_bits"] = residual_v_bits
 
     def _finalize_compressed_block(
         self,
@@ -836,7 +639,6 @@ class BlockCacheLayer(HFCacheLayerMixin):
             value_bits=v_bits,
             dtype=dtype,
         )
-        k, v = self._apply_residual_payloads(blk, k, v, dtype)
 
         if self.cfg.max_cached_decompressed_blocks > 0:
             self._decompressed_cache[cache_key] = (k, v)
@@ -864,92 +666,6 @@ class BlockCacheLayer(HFCacheLayerMixin):
             raise RuntimeError(f"compressed run {run_id} is inactive")
         run_key = "compressed_k" if compressed.get("ttype") == "k" else "compressed_v"
         return self._slice_turboquant_compressed(run[run_key], start, int(length))
-
-    def _apply_residual_payloads(
-        self,
-        blk: KVBlock,
-        k: torch.Tensor,
-        v: torch.Tensor,
-        dtype: torch.dtype,
-    ) -> tuple[torch.Tensor, torch.Tensor]:
-        if not isinstance(self.page_backend, TurboQuantPageBackend):
-            return k, v
-        if isinstance(blk.compressed_k, dict) and "__residual" in blk.compressed_k:
-            bits = float(blk.compressed_k["__residual_bits"])
-            residual = self.page_backend.get_compressor("k", bits).decompress(
-                blk.compressed_k["__residual"]
-            )
-            k = k + residual.to(dtype)
-        if isinstance(blk.compressed_v, dict) and "__residual" in blk.compressed_v:
-            bits = float(blk.compressed_v["__residual_bits"])
-            residual = self.page_backend.get_compressor("v", bits).decompress(
-                blk.compressed_v["__residual"]
-            )
-            v = v + residual.to(dtype)
-        return k, v
-
-    def _apply_batched_residual_payloads(
-        self,
-        blocks: list[KVBlock],
-        k: torch.Tensor,
-        v: torch.Tensor,
-        dtype: torch.dtype,
-    ) -> tuple[torch.Tensor, torch.Tensor]:
-        if not isinstance(self.page_backend, TurboQuantPageBackend):
-            return k, v
-
-        positions: list[tuple[KVBlock, int, int]] = []
-        start = 0
-        for blk in blocks:
-            end = start + blk.current_len
-            positions.append((blk, start, end))
-            start = end
-
-        k_entries = [
-            (blk, start, end)
-            for blk, start, end in positions
-            if isinstance(blk.compressed_k, dict) and "__residual" in blk.compressed_k
-        ]
-        if k_entries:
-            bits = float(k_entries[0][0].compressed_k["__residual_bits"])
-            merged = self._merge_turboquant_compressed(
-                [blk.compressed_k["__residual"] for blk, _start, _end in k_entries]
-            )
-            residual = (
-                self.page_backend.get_compressor("k", bits)
-                .decompress(merged)
-                .to(dtype)
-            )
-            k = k.clone()
-            offset = 0
-            for blk, start, end in k_entries:
-                next_offset = offset + blk.current_len
-                k[:, :, start:end, :] += residual[:, :, offset:next_offset, :]
-                offset = next_offset
-
-        v_entries = [
-            (blk, start, end)
-            for blk, start, end in positions
-            if isinstance(blk.compressed_v, dict) and "__residual" in blk.compressed_v
-        ]
-        if v_entries:
-            bits = float(v_entries[0][0].compressed_v["__residual_bits"])
-            merged = self._merge_turboquant_compressed(
-                [blk.compressed_v["__residual"] for blk, _start, _end in v_entries]
-            )
-            residual = (
-                self.page_backend.get_compressor("v", bits)
-                .decompress(merged)
-                .to(dtype)
-            )
-            v = v.clone()
-            offset = 0
-            for blk, start, end in v_entries:
-                next_offset = offset + blk.current_len
-                v[:, :, start:end, :] += residual[:, :, offset:next_offset, :]
-                offset = next_offset
-
-        return k, v
 
     @staticmethod
     def _slice_turboquant_compressed(
@@ -1035,12 +751,6 @@ class BlockCacheLayer(HFCacheLayerMixin):
             value_bits=v_bits,
             dtype=dtype,
         )
-        if any(
-            (isinstance(blk.compressed_k, dict) and "__residual" in blk.compressed_k)
-            or (isinstance(blk.compressed_v, dict) and "__residual" in blk.compressed_v)
-            for blk in blocks
-        ):
-            return self._apply_batched_residual_payloads(blocks, k, v, dtype)
         return k, v
 
     def _turboquant_run_for_group(

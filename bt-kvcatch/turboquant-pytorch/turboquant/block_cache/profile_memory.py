@@ -159,8 +159,6 @@ def profile_backend(model, tokenizer, args, backend: str) -> ProfileResult:
             "high_value_bits": high_v,
             "low_key_bits": low_k,
             "low_value_bits": low_v,
-            "residual_key_bits": args.residual_key_bits,
-            "residual_value_bits": args.residual_value_bits,
             "group_size": args.group_size,
             "key_group_size": args.key_group_size,
             "value_group_size": args.value_group_size,
@@ -301,11 +299,9 @@ def main() -> None:
     parser.add_argument("--low-value-bits", type=_parse_bits, default=2)
     parser.add_argument(
         "--mixed-precision-mode",
-        choices=["direct", "base_residual"],
+        choices=["direct"],
         default="direct",
     )
-    parser.add_argument("--residual-key-bits", type=_parse_bits, default=2)
-    parser.add_argument("--residual-value-bits", type=_parse_bits, default=0)
     parser.add_argument("--num-layers", type=int, default=None)
     parser.add_argument("--protected-layers", type=int, default=0)
     parser.add_argument("--protected-key-bits", type=_parse_bits, default=8)

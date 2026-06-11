@@ -30,14 +30,6 @@ def theoretical_bpw_from_config(
 
     if config.get("mixed"):
         ratio = _as_float(config.get("important_ratio"), 0.3)
-        if config.get("mixed_precision_mode") == "base_residual":
-            k = _as_float(config.get("low_key_bits"), 2) + ratio * _as_float(
-                config.get("residual_key_bits"), 2
-            )
-            v = _as_float(config.get("low_value_bits"), 2) + ratio * _as_float(
-                config.get("residual_value_bits"), 0
-            )
-            return k, v, (k + v) / 2.0
         k = ratio * _as_float(config.get("high_key_bits"), 4) + (1 - ratio) * _as_float(
             config.get("low_key_bits"), 2
         )
